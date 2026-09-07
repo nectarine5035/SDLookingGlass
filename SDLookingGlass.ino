@@ -178,9 +178,35 @@ void executeCommand(char* line) {
   int space1 = -1;
   int i, sp, pin, count;
   char buf[40];
+  char exp[32] = "";
 
   strncpy(cmd, line, 31);
   cmd[31] = '\0';
+  exp[31] = '\0';
+
+  int expCheck = indexOf(cmd, "$(("); //Check for expression in parentheses
+  if (expCheck != -1) {
+    int expCheck2 = indexOf(cmd, "))");
+    if (expCheck2 != -1) {
+      int j = 0;
+
+      for (int i = expCheck + 3; i < expCheck2; i++) { //Copy text in parentheses to exp
+        exp[j] = cmd[i];
+        j++;
+      }
+      exp[j] = '\0';
+
+      toUppercase(exp); //Function on exp
+
+      for (int i = 0; i <= j; i++) { //Replace parentheses section with exp (only works if parentheses section is at the end)
+        cmd[expCheck + i] = exp[i];
+      }
+
+    } else {
+      Serial.println(F("Error: expected '))'"));
+      return;
+    }
+  }
 
   for (i = 0; cmd[i] != '\0'; i++) { //Break up the input into command (everything before first space) and arguments
     if (cmd[i] == ' ') {
