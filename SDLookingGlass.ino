@@ -232,6 +232,7 @@ void executeCommand(char* line) {
   int i, sp, pin, count;
   char buf[40];
   char exp[32] = "";
+  char cmdOld[32] = "";
 
   strncpy(cmd, line, 31);
   cmd[31] = '\0';
@@ -242,6 +243,7 @@ void executeCommand(char* line) {
     int expCheck2 = indexOf(cmd, "))");
     if (expCheck2 != -1) {
       int j = 0;
+      strncpy(cmdOld, cmd, 31);
 
       for (int i = expCheck + 3; i < expCheck2; i++) { //Copy text in parentheses to exp
         exp[j] = cmd[i];
@@ -255,6 +257,7 @@ void executeCommand(char* line) {
         if (fmod(result, 1) == 0.00) {
           int intResult = floor(result);
           sprintf(exp, "%d", intResult);
+          j = ceil(log10(intResult));
         } else {
           sprintf(exp, "%f", result);
           j = 8;
@@ -264,10 +267,16 @@ void executeCommand(char* line) {
         return;
       }
 
-      for (int i = 0; i <= j; i++) { //Replace parentheses section with exp (only works if parentheses section is at the end)
+      for (int i = 0; i <= j; i++) { //Replace parentheses section with exp
         cmd[expCheck + i] = exp[i];
       }
-
+      for (int i = expCheck2 + 2; i < 31; i++) {
+        cmd[expCheck + j] = cmdOld[i];
+        j++;
+        if (cmdOld[i] == '\0') {
+          break;
+        }
+      }
     } else {
       Serial.println(F("Error: expected '))'"));
       return;
