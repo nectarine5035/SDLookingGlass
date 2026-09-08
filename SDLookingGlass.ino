@@ -223,6 +223,47 @@ float expression() {
   return result;
 }
 
+void dollarSignDoublePar(char* str, int p1, int p2) { //Replaces expression in $(( )) with the solution to that expression
+  int j = 0;
+  char cmdOld[32] = "";
+  strncpy(cmdOld, str, 31);
+  char exp[32] = "";
+  exp[31] = '\0';
+
+  for (int i = p1 + 3; i < p2; i++) { //Copy text in parentheses to exp
+    exp[j] = str[i];
+    j++;
+  }
+  exp[j] = '\0';
+
+  expressionToParse = exp; //Parse expression in exp. Calc functions from https://github.com/Enjoy-Mechatronics/Arduino-Calculator
+  float result = expression();
+  if(isinf(result) == 0 && isnan(result)==0){
+    if (fmod(result, 1) == 0.00) {
+      int intResult = floor(result);
+      sprintf(exp, "%d", intResult);
+      j = ceil(log10(intResult));
+    } else {
+      sprintf(exp, "%f", result);
+      j = 8;
+    }
+  }else{
+    Serial.println("Invalid calculation");
+    return;
+  }
+
+  for (int i = 0; i <= j; i++) { //Replace parentheses section with exp
+    str[p1 + i] = exp[i];
+  }
+  for (int i = p2 + 2; i < 31; i++) {
+    str[p1 + j] = cmdOld[i];
+    j++;
+    if (cmdOld[i] == '\0') {
+      break;
+    }
+  }
+}
+
 void runScript(const char* content);
 
 void executeCommand(char* line) {
@@ -231,52 +272,15 @@ void executeCommand(char* line) {
   int space1 = -1;
   int i, sp, pin, count;
   char buf[40];
-  char exp[32] = "";
-  char cmdOld[32] = "";
 
   strncpy(cmd, line, 31);
   cmd[31] = '\0';
-  exp[31] = '\0';
 
   int expCheck = indexOf(cmd, "$(("); //Check for expression in parentheses
   if (expCheck != -1) {
     int expCheck2 = indexOf(cmd, "))");
     if (expCheck2 != -1) {
-      int j = 0;
-      strncpy(cmdOld, cmd, 31);
-
-      for (int i = expCheck + 3; i < expCheck2; i++) { //Copy text in parentheses to exp
-        exp[j] = cmd[i];
-        j++;
-      }
-      exp[j] = '\0';
-
-      expressionToParse = exp; //Parse expression in exp. Calc functions from https://github.com/Enjoy-Mechatronics/Arduino-Calculator
-      float result = expression();
-      if(isinf(result) == 0 && isnan(result)==0){
-        if (fmod(result, 1) == 0.00) {
-          int intResult = floor(result);
-          sprintf(exp, "%d", intResult);
-          j = ceil(log10(intResult));
-        } else {
-          sprintf(exp, "%f", result);
-          j = 8;
-        }
-      }else{
-        Serial.println("Invalid calculation");
-        return;
-      }
-
-      for (int i = 0; i <= j; i++) { //Replace parentheses section with exp
-        cmd[expCheck + i] = exp[i];
-      }
-      for (int i = expCheck2 + 2; i < 31; i++) {
-        cmd[expCheck + j] = cmdOld[i];
-        j++;
-        if (cmdOld[i] == '\0') {
-          break;
-        }
-      }
+      dollarSignDoublePar(cmd, expCheck, expCheck2);
     } else {
       Serial.println(F("Error: expected '))'"));
       return;
