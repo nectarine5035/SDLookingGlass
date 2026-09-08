@@ -31,6 +31,8 @@ typedef struct {
 } AliasEntry;
 AliasEntry aliases[MAX_ALIASES];
 
+char* expressionToParse;
+
 //File root;
 
 float freeMemory() {
@@ -170,6 +172,57 @@ int safeConcatPath(char* dest, const char* add) { //Determine if result of cd wi
   return 1;
 }
 
+char peek() {
+  return *expressionToParse;
+}
+
+char get() {
+  return *expressionToParse++;
+}
+
+float number() {
+  float result = get() - '0';
+  while (peek() >= '0' && peek() <= '9') {
+    result = 10 * result + get() - '0';
+  }
+  return result;
+}
+
+float factor() {
+  if (peek() >= '0' && peek() <= '9')
+    return number();
+  else if (peek() == '(') {
+    get();  // '('
+    float result = expression();
+    get();  // ')'
+    return result;
+  } else if (peek() == '-') {
+    get();
+    return -factor();
+  }
+  return 0;  // error
+}
+
+float term() {
+  float result = factor();
+  while (peek() == '*' || peek() == '/')
+    if (get() == '*')
+      result *= factor();
+    else
+      result /= factor();
+  return result;
+}
+
+float expression() {
+  float result = term();
+  while (peek() == '+' || peek() == '-')
+    if (get() == '+')
+      result += term();
+    else
+      result -= term();
+  return result;
+}
+
 void runScript(const char* content);
 
 void executeCommand(char* line) {
@@ -196,7 +249,20 @@ void executeCommand(char* line) {
       }
       exp[j] = '\0';
 
-      toUppercase(exp); //Function on exp
+      expressionToParse = exp; //Parse expression in exp. Calc functions from https://github.com/Enjoy-Mechatronics/Arduino-Calculator
+      float result = expression();
+      if(isinf(result) == 0 && isnan(result)==0){
+        if (fmod(result, 1) == 0.00) {
+          int intResult = floor(result);
+          sprintf(exp, "%d", intResult);
+        } else {
+          sprintf(exp, "%f", result);
+          j = 8;
+        }
+      }else{
+        Serial.println("Invalid calculation");
+        return;
+      }
 
       for (int i = 0; i <= j; i++) { //Replace parentheses section with exp (only works if parentheses section is at the end)
         cmd[expCheck + i] = exp[i];
