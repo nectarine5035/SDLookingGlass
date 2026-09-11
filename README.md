@@ -25,6 +25,9 @@ A fork of [my previous fork](https://github.com/nectarine5035/KernelUNOwithSD) o
 - `clear` - Clear terminal
 - `reboot` - Reboot device
 - `alias` - Create command alias
+- `$(([expression]))`  -- Solve a math expression
+- `[variable]=[number]`  -- Set a variable
+- `unset` - Unset a variable
 
 ## License
 
