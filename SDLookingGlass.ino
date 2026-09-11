@@ -7,6 +7,8 @@
 #define PATH_LEN 16
 #define DMESG_LINES 6
 #define DMESG_LEN 40
+#define VAR_SPACES 6
+#define VAR_NAME_LEN 8
 
 const int chipSelect = BUILTIN_SDCARD;
 
@@ -15,11 +17,18 @@ typedef struct {
   char message[DMESG_LEN];
 } DmesgEntry;
 
+typedef struct {
+  float value;
+  char name[VAR_NAME_LEN];
+} shVariable;
+
 char currentPath[PATH_LEN] = "/";
 char inputBuffer[32] = "";
 int inputLen = 0;
 DmesgEntry dmesg[DMESG_LINES];
 int dmesgIndex = 0;
+shVariable vars[VAR_SPACES];
+int varIndex = 0;
 
 #define MAX_ALIASES 4
 #define ALIAS_NAME_LEN 6
@@ -172,6 +181,37 @@ int safeConcatPath(char* dest, const char* add) { //Determine if result of cd wi
   return 1;
 }
 
+float decimalCharToFloat(char* str) {
+  int beforeDec = 0;
+  int afterDec = 0;
+  int pos = 0;
+  float total = 0;
+  for (int i = 0; i < 31; i++) {
+    if (str[i] == '.') {
+      pos = 1;
+    } else if ((str[i] - '0') >= 0 && (str[i] - '0') <= 9) {
+      if (pos) {
+        afterDec++;
+      } else {
+        beforeDec++;
+      }
+    } else if (str[i] == '\0') {
+      break;
+    } else {
+      Serial.println(F("Invalid number"));
+      return 0;
+    }
+  }
+  for (int i = 0; i < beforeDec; i++) {
+    total = total + (str[i] - '0')*pow(10, (beforeDec-i-1));
+  }
+  for (int i = 1; i <= afterDec; i++) {
+    total = total + (str[beforeDec + i] - '0')*pow(10, -i);
+  }
+
+  return total;
+}
+
 char peek() {
   return *expressionToParse;
 }
@@ -264,6 +304,48 @@ void dollarSignDoublePar(char* str, int p1, int p2) { //Replaces expression in $
   }
 }
 
+void variableSubstitute(char* str) { //Replaces variable name with the value of that variable
+  for (int i = 0; i < varIndex; i++) { //Check for variables in entry
+    int varCheck = indexOf(str, vars[i].name);
+    if (varCheck != -1) {
+      int j = 0; //Length of variable name
+      while (vars[i].name[j] != '\0') {
+        j++;
+      }
+
+      char flOut[8];
+      int k; //Length of variable value
+      if (fmod(vars[i].value, 1) == 0.00) {
+        k = ceil(log10(vars[i].value));
+        snprintf(flOut, k+1, "%f", vars[i].value);
+      } else {
+        k = 7;
+        snprintf(flOut, 8, "%f", vars[i].value);
+      }
+
+      int m = 0;
+      char substitute[32];
+      for (int l = 0; l < varCheck; l++) {
+        substitute[m] = str[l];
+        m++;
+      }
+      for (int l = 0; l < k; l++) {
+        substitute[m] = flOut[l];
+        m++;
+      }
+      for (int l = (varCheck + j); l < 32; l++) {
+        substitute[m] = str[l];
+        m++;
+        if (str[l] == '\0') {
+          break;
+        }
+      }
+      substitute[m] = '\0';
+      strcpy(str, substitute);
+    }
+  }
+}
+
 void runScript(const char* content);
 
 void executeCommand(char* line) {
@@ -280,6 +362,7 @@ void executeCommand(char* line) {
   if (expCheck != -1) {
     int expCheck2 = indexOf(cmd, "))");
     if (expCheck2 != -1) {
+      variableSubstitute(cmd);
       dollarSignDoublePar(cmd, expCheck, expCheck2);
     } else {
       Serial.println(F("Error: expected '))'"));
@@ -397,6 +480,7 @@ void executeCommand(char* line) {
     Serial.println(currentPath);
   }
   else if (strcmp_P(cmd, PSTR("echo")) == 0) {
+    variableSubstitute(args);
     int arrow = indexOf(args, " > ");
     if (arrow != -1) { //Option to use > to send string to file
       char text[40] = "";
@@ -645,6 +729,47 @@ void executeCommand(char* line) {
         executeCommand(aliasLine);
         resolved = 1;
         break;
+      }
+    }
+    int eqCheck = indexOf(cmd, "="); //Check for expression in parentheses
+    if (eqCheck != -1) {
+      resolved = 1;
+      char varName[32] = "";
+      strncpy(varName, cmd, eqCheck);
+
+      char varVal[32] = "";
+      int j = 0;
+      for (int i = eqCheck + 1; i < 31; i++) {
+        varVal[j] = cmd[i];
+        j++;
+        if (cmd[i] == '\0') {
+          break;
+        }
+      }
+      float varTotal = decimalCharToFloat(varVal);
+
+      int existing = 0;
+      for (int i = 0; i < varIndex; i++) {
+        if (strcmp(vars[i].name, varName) == 0) {
+          vars[i].value = varTotal;
+          existing = 1;
+        }
+      }
+      if (!existing) {
+        if (varIndex < VAR_SPACES) {
+          strcpy(vars[varIndex].name, varName);
+          vars[varIndex].value = varTotal;
+          varIndex++;
+        } else {
+          Serial.println(F("No space available for vars"));
+        }
+      }
+
+      Serial.println(F("All current vars:"));
+      for (int i = 0; i < varIndex; i++) {
+        Serial.print(vars[i].name);
+        Serial.print(": ");
+        Serial.println(vars[i].value);
       }
     }
     if (!resolved) Serial.println(F("Unknown command."));
