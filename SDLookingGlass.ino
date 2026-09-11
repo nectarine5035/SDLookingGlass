@@ -711,7 +711,30 @@ void executeCommand(char* line) {
     Serial.println(F("clear - Clear terminal"));
     Serial.println(F("reboot - Reboot device"));
     Serial.println(F("alias - Create command alias"));
+    Serial.println(F("$(([expression]))  -- Solve a math expression"));
+    Serial.println(F("[variable]=[number]  -- Set a variable"));
+    Serial.println(F("unset - Unset a variable"));
     Serial.println(F(" "));
+  }
+  else if (strcmp_P(cmd, PSTR("unset")) == 0) {
+    //Serial.println(F("debug"));
+    //Serial.println(args);
+    int found = 0;
+
+    for (int i = 0; i < varIndex; i++) {
+      if (strcmp_P(vars[i].name, args) == 0) {
+        found = 1;
+      }
+      if (found) {
+        strcpy(vars[i].name, vars[i+1].name);
+        vars[i].value = vars[i+1].value;
+      }
+    }
+    if (found) {
+      varIndex--;
+    } else {
+      Serial.println(F("Variable not found"));
+    }
   }
   else {
     // check alias
@@ -731,7 +754,9 @@ void executeCommand(char* line) {
         break;
       }
     }
-    int eqCheck = indexOf(cmd, "="); //Check for expression in parentheses
+
+    //Check for variables being set
+    int eqCheck = indexOf(cmd, "=");
     if (eqCheck != -1) {
       resolved = 1;
       char varName[32] = "";
@@ -761,16 +786,16 @@ void executeCommand(char* line) {
           vars[varIndex].value = varTotal;
           varIndex++;
         } else {
-          Serial.println(F("No space available for vars"));
+          Serial.println(F("No space available for variables"));
         }
       }
 
-      Serial.println(F("All current vars:"));
-      for (int i = 0; i < varIndex; i++) {
-        Serial.print(vars[i].name);
-        Serial.print(": ");
-        Serial.println(vars[i].value);
-      }
+      //Serial.println(F("All current vars:"));
+      //for (int i = 0; i < varIndex; i++) {
+      //  Serial.print(vars[i].name);
+      //  Serial.print(": ");
+      //  Serial.println(vars[i].value);
+      //}
     }
     if (!resolved) Serial.println(F("Unknown command."));
   }
