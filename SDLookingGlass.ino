@@ -222,7 +222,12 @@ void variableSubstitute(char* str) { //Replaces variable name with the value of 
       char flOut[8];
       int k; //Length of variable value
       if (fmod(vars[i].value, 1) == 0.00) {
-        k = ceil(log10(vars[i].value));
+        
+        if (vars[i].value == 1) {
+          k = 1;
+        } else {
+          k = ceil(log10(vars[i].value));
+        }
         snprintf(flOut, k+1, "%f", vars[i].value);
       } else {
         k = 7;
@@ -375,7 +380,6 @@ void dollarSignDoublePar(char* str) { //Replaces expression in $(( )) with the s
   if (expCheck != -1) {
     int expCheck2 = indexOf(str, "))");
     if (expCheck2 != -1) {
-      variableSubstitute(str);
       int j = 0;
       char cmdOld[32] = "";
       strncpy(cmdOld, str, 31);
@@ -387,6 +391,9 @@ void dollarSignDoublePar(char* str) { //Replaces expression in $(( )) with the s
         j++;
       }
       exp[j] = '\0';
+
+      variableSubstitute(exp);
+      Serial.println(exp);
 
       while (containsParentheses(exp) == 1) {
         solveParentheses(exp);
@@ -545,6 +552,7 @@ void executeCommand(char* line) {
   }
   else if (strcmp_P(cmd, PSTR("echo")) == 0) {
     variableSubstitute(args);
+
     int arrow = indexOf(args, " > ");
     if (arrow != -1) { //Option to use > to send string to file
       char text[40] = "";
