@@ -40,8 +40,6 @@ typedef struct {
 } AliasEntry;
 AliasEntry aliases[MAX_ALIASES];
 
-char* expressionToParse;
-
 //File root;
 
 float freeMemory() {
@@ -212,57 +210,6 @@ float decimalCharToFloat(char* str) {
   return total;
 }
 
-char peek() {
-  return *expressionToParse;
-}
-
-char get() {
-  return *expressionToParse++;
-}
-
-float number() {
-  float result = get() - '0';
-  while (peek() >= '0' && peek() <= '9') {
-    result = 10 * result + get() - '0';
-  }
-  return result;
-}
-
-float factor() {
-  if (peek() >= '0' && peek() <= '9')
-    return number();
-  else if (peek() == '(') {
-    get();  // '('
-    float result = expression();
-    get();  // ')'
-    return result;
-  } else if (peek() == '-') {
-    get();
-    return -factor();
-  }
-  return 0;  // error
-}
-
-float term() {
-  float result = factor();
-  while (peek() == '*' || peek() == '/')
-    if (get() == '*')
-      result *= factor();
-    else
-      result /= factor();
-  return result;
-}
-
-float expression() {
-  float result = term();
-  while (peek() == '+' || peek() == '-')
-    if (get() == '+')
-      result += term();
-    else
-      result -= term();
-  return result;
-}
-
 void variableSubstitute(char* str) { //Replaces variable name with the value of that variable
   for (int i = 0; i < varIndex; i++) { //Check for variables in entry
     int varCheck = indexOf(str, vars[i].name);
@@ -305,6 +252,124 @@ void variableSubstitute(char* str) { //Replaces variable name with the value of 
   }
 }
 
+int isOperator(char in) {
+  if (in == '+' || in == '-' || in == '*' || in == '/') {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+void solveArithmetic(char* str) {
+  char tempFloat[8];
+  int termsIndex = 0;
+  float firstVal = 0;
+  float secondVal;
+  int nextOp = 0;
+
+  for (int i = 0; str[i] != '\0'; i++) {
+    if (isOperator(str[i])) {
+      tempFloat[termsIndex] = '\0';
+      termsIndex = 0;
+      secondVal = decimalCharToFloat(tempFloat);
+      if (nextOp == 0) {
+        firstVal = firstVal + secondVal;
+      } else if (nextOp == 1) {
+        firstVal = firstVal - secondVal;
+      } else if (nextOp == 2) {
+        firstVal = firstVal * secondVal;
+      } else if (nextOp == 3) {
+        firstVal = firstVal / secondVal;
+      }
+
+      if (str[i] == '+') {
+        nextOp = 0;
+      } else if (str[i] == '-') {
+        nextOp = 1;
+      } else if (str[i] == '*') {
+        nextOp = 2;
+      } else if (str[i] == '/') {
+        nextOp = 3;
+      }
+    } else {
+      tempFloat[termsIndex] = str[i];
+      termsIndex++;
+    }
+  }
+  tempFloat[termsIndex] = '\0';
+  secondVal = decimalCharToFloat(tempFloat);
+  if (nextOp == 0) {
+    firstVal = firstVal + secondVal;
+  } else if (nextOp == 1) {
+    firstVal = firstVal - secondVal;
+  } else if (nextOp == 2) {
+    firstVal = firstVal * secondVal;
+  } else if (nextOp == 3) {
+    firstVal = firstVal / secondVal;
+  }
+
+  if (fmod(firstVal, 1) == 0.00) {
+    int firstValInt = firstVal;
+    sprintf(str, "%d", firstValInt);
+  } else {
+    sprintf(str, "%f", firstVal);
+  }
+}
+
+void solveParentheses(char* str) {
+  int startingIndex;
+  int endingIndex = 0;
+  char tempString[32] = "";
+
+  while (str[endingIndex] != ')') {
+    endingIndex++;
+  }
+  startingIndex = endingIndex;
+  //Serial.print("ending index:");
+  //Serial.println(endingIndex);
+  while (str[startingIndex] != '(') {
+    startingIndex--;
+  }
+  //Serial.print("starting index:");
+  //Serial.println(startingIndex);
+
+  int j = 0;
+  for (int i = startingIndex+1; i < endingIndex; i++) {
+    tempString[j] = str[i];
+    j++;
+  }
+  tempString[j] = '\0';
+
+  solveArithmetic(tempString);
+
+  int m = 0;
+  char substitute[32];
+  for (int l = 0; l < startingIndex; l++) {
+    substitute[m] = str[l];
+    m++;
+  }
+  for (int l = 0; tempString[l] != '\0'; l++) {
+    substitute[m] = tempString[l];
+    m++;
+  }
+  for (int l = endingIndex+1; str[l] != '\0'; l++) {
+    substitute[m] = str[l];
+    m++;
+  }
+  substitute[m] = '\0';
+  strcpy(str, substitute);
+}
+
+int containsParentheses(char* str) {
+  int parCheck1 = indexOf(str, ")");
+  int parCheck2 = indexOf(str, "(");
+  if (parCheck1 != -1 && parCheck2 != -1) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
 void dollarSignDoublePar(char* str) { //Replaces expression in $(( )) with the solution to that expression
   int expCheck = indexOf(str, "$(("); //Check for expression in parentheses
   if (expCheck != -1) {
@@ -317,37 +382,36 @@ void dollarSignDoublePar(char* str) { //Replaces expression in $(( )) with the s
       char exp[32] = "";
       exp[31] = '\0';
 
-      for (int i = expCheck + 3; i < expCheck2; i++) { //Copy text in parentheses to exp
+      for (int i = expCheck + 2; i <= expCheck2; i++) { //Copy text in parentheses to exp
         exp[j] = str[i];
         j++;
       }
       exp[j] = '\0';
 
-      expressionToParse = exp; //Parse expression in exp. Calc functions from https://github.com/Enjoy-Mechatronics/Arduino-Calculator
-      float result = expression();
-      if(isinf(result) == 0 && isnan(result)==0){
-        if (fmod(result, 1) == 0.00) {
-          int intResult = floor(result);
-          sprintf(exp, "%d", intResult);
-          j = ceil(log10(intResult));
-        } else {
-          sprintf(exp, "%f", result);
-          j = 8;
-        }
-      }else{
-        Serial.println("Invalid calculation");
-        return;
+      while (containsParentheses(exp) == 1) {
+        solveParentheses(exp);
       }
-
-      for (int i = 0; i <= j; i++) { //Replace parentheses section with exp
-        str[expCheck + i] = exp[i];
-      }
-      for (int i = expCheck2 + 2; i < 31; i++) {
-        str[expCheck + j] = cmdOld[i];
-        j++;
-        if (cmdOld[i] == '\0') {
-          break;
+      int alphanumeric = 1;
+      for (int i = 0; exp[i] != '\0'; i++) {
+        if ((exp[i] < '0' || exp[i] > '9') && exp[i] != '.') {
+          alphanumeric = 0;
         }
+      }
+      if (alphanumeric) {
+        int expLength; //Replace the expression in str with exp
+        for (expLength = 0; exp[expLength] != '\0'; expLength++) {}
+        int j = expCheck;
+        for (int i = 0; i < expLength; i++) {
+          str[j] = exp[i];
+          j++;
+        }
+        for (int i = expCheck2+2; cmdOld[i] != '\0'; i++) {
+          str[j] = cmdOld[i];
+          j++;
+        }
+        str[j] = '\0';
+      } else {
+        Serial.println("Invalid expression");
       }
     } else {
       Serial.println(F("Error: expected '))'"));
