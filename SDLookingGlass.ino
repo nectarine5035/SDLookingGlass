@@ -1,34 +1,24 @@
-#include <Arduino.h>
-#include <string.h>
-#include <avr/pgmspace.h>
 #include <SD.h>
-      
-#define NAME_LEN 12
-#define PATH_LEN 16
-#define DMESG_LINES 6
-#define DMESG_LEN 40
-#define VAR_SPACES 6
-#define VAR_NAME_LEN 8
 
 const int chipSelect = BUILTIN_SDCARD;
 
+#define INPUT_LEN 32
+char inputBuffer[INPUT_LEN] = "";
+int inputLen = 0;
+
+#define NAME_LEN 12
+
+#define PATH_LEN 16
+char currentPath[PATH_LEN] = "/";
+
+#define DMESG_LINES 6
+#define DMESG_LEN 40
 typedef struct {
   unsigned long timestamp;
   char message[DMESG_LEN];
 } DmesgEntry;
-
-typedef struct {
-  float value;
-  char name[VAR_NAME_LEN];
-} shVariable;
-
-char currentPath[PATH_LEN] = "/";
-char inputBuffer[32] = "";
-int inputLen = 0;
 DmesgEntry dmesg[DMESG_LINES];
 int dmesgIndex = 0;
-shVariable vars[VAR_SPACES];
-int varIndex = 0;
 
 #define MAX_ALIASES 4
 #define ALIAS_NAME_LEN 6
@@ -40,7 +30,14 @@ typedef struct {
 } AliasEntry;
 AliasEntry aliases[MAX_ALIASES];
 
-//File root;
+#define VAR_SPACES 6
+#define VAR_NAME_LEN 8
+typedef struct {
+  float value;
+  char name[VAR_NAME_LEN];
+} shVariable;
+shVariable vars[VAR_SPACES];
+int varIndex = 0;
 
 float freeMemory() {
   Sd2Card card;
@@ -59,7 +56,6 @@ float freeMemory() {
   volumesize *= volume.clusterCount();
   volumesize /= 2;
   volumesize /= 1024;
-  //Serial.print("Volume size (GB):  ");
   float gigs = ((float)volumesize / 1024.0);
 
   return gigs;
@@ -76,62 +72,16 @@ void addDmesg(const __FlashStringHelper* msg) {
   dmesgIndex++;
 }
 
-void addDmesgRam(const char* msg) {
-  if (dmesgIndex >= DMESG_LINES) dmesgIndex = 0;
-  dmesg[dmesgIndex].timestamp = millis() / 1000;
-  strncpy(dmesg[dmesgIndex].message, msg, DMESG_LEN - 1);
-  dmesg[dmesgIndex].message[DMESG_LEN - 1] = '\0';
-  dmesgIndex++;
-}
-
 void printPrompt() {
   Serial.print(F("root@lookingglass:"));
   Serial.print(currentPath);
   Serial.print(F("# "));
 }
 
-void setup() {
-  Serial.begin(115200);
-
-  if (!SD.begin(chipSelect)) {
-    Serial.println("SD card initialization failed");
-    while (true);
-  }
-
-  Serial.println(F("\n--- SDLookingGlass v1.0 ---"));
-  Serial.println(F("Type 'help' for commands"));
-  printPrompt();
-}
-
-void loop() {
-  if (Serial.available() > 0) {
-    char c = Serial.read();
-    if (c == '\r' || c == '\n') { //Enter
-      if (inputLen > 0) {
-        inputBuffer[inputLen] = '\0';
-        Serial.println();
-        executeCommand(inputBuffer);
-        inputLen = 0;
-        memset(inputBuffer, 0, 32);
-        printPrompt();
-      } else {
-        
-        Serial.println();
-        printPrompt();
-      }
-    }
-    else if (c == 8 || c == 127) { //Backspace
-      if (inputLen > 0) {
-        inputLen--;
-        inputBuffer[inputLen] = '\0';
-        Serial.print(F("\b \b"));
-      }
-    }
-    else if (inputLen < 31) {
-      Serial.print(c);
-      inputBuffer[inputLen] = c;
-      inputLen++;
-    }
+void toLowercase(char* str) {
+  int i;
+  for (i = 0; str[i] != '\0'; i++) {
+    if (str[i] >= 'A' && str[i] <= 'Z') str[i] = str[i] - 'A' + 'a';
   }
 }
 
@@ -145,29 +95,6 @@ int indexOf(const char* str, const char* substr) { //Find the point in a string 
     if (match) return i;
   }
   return -1;
-}
-
-int atoi_safe(const char* str) { //Convert multi digit number in a string to an integer
-  int num = 0;
-  while (*str >= '0' && *str <= '9') {
-    num = num * 10 + (*str - '0');
-    str++;
-  }
-  return num;
-}
-
-void toLowercase(char* str) {
-  int i;
-  for (i = 0; str[i] != '\0'; i++) {
-    if (str[i] >= 'A' && str[i] <= 'Z') str[i] = str[i] - 'A' + 'a';
-  }
-}
-
-void toUppercase(char* str) {
-  int i;
-  for (i = 0; str[i] != '\0'; i++) {
-    if (str[i] >= 'a' && str[i] <= 'z') str[i] = str[i] - 'a' + 'A';
-  }
 }
 
 int safeConcatPath(char* dest, const char* add) { //Determine if result of cd will be too long for the path buffer, if not it sets the directory to that result
@@ -184,7 +111,7 @@ float decimalCharToFloat(char* str) {
   int afterDec = 0;
   int pos = 0;
   float total = 0;
-  for (int i = 0; i < 31; i++) {
+  for (int i = 0; str[i] != '\0'; i++) {
     if (str[i] == '.') {
       pos = 1;
     } else if ((str[i] - '0') >= 0 && (str[i] - '0') <= 9) {
@@ -193,8 +120,6 @@ float decimalCharToFloat(char* str) {
       } else {
         beforeDec++;
       }
-    } else if (str[i] == '\0') {
-      break;
     } else {
       Serial.println(F("Invalid number"));
       return 0;
@@ -206,7 +131,6 @@ float decimalCharToFloat(char* str) {
   for (int i = 1; i <= afterDec; i++) {
     total = total + (str[beforeDec + i] - '0')*pow(10, -i);
   }
-
   return total;
 }
 
@@ -219,7 +143,7 @@ void variableSubstitute(char* str) { //Replaces variable name with the value of 
         j++;
       }
 
-      char flOut[8];
+      char flOut[9];
       int k; //Length of variable value
       if (fmod(vars[i].value, 1) == 0.00) {
         
@@ -228,14 +152,14 @@ void variableSubstitute(char* str) { //Replaces variable name with the value of 
         } else {
           k = ceil(log10(vars[i].value));
         }
-        snprintf(flOut, k+1, "%f", vars[i].value);
+        sprintf(flOut, "%f", vars[i].value);
       } else {
         k = 7;
-        snprintf(flOut, 8, "%f", vars[i].value);
+        sprintf(flOut, "%f", vars[i].value);
       }
 
       int m = 0;
-      char substitute[32];
+      char substitute[INPUT_LEN];
       for (int l = 0; l < varCheck; l++) {
         substitute[m] = str[l];
         m++;
@@ -244,7 +168,7 @@ void variableSubstitute(char* str) { //Replaces variable name with the value of 
         substitute[m] = flOut[l];
         m++;
       }
-      for (int l = (varCheck + j); l < 32; l++) {
+      for (int l = (varCheck + j); l < INPUT_LEN; l++) {
         substitute[m] = str[l];
         m++;
         if (str[l] == '\0') {
@@ -257,14 +181,6 @@ void variableSubstitute(char* str) { //Replaces variable name with the value of 
   }
 }
 
-int isOperator(char in) {
-  if (in == '+' || in == '-' || in == '*' || in == '/') {
-    return 1;
-  } else {
-    return 0;
-  }
-}
-
 void solveArithmetic(char* str) {
   char tempFloat[8];
   int termsIndex = 0;
@@ -273,7 +189,7 @@ void solveArithmetic(char* str) {
   int nextOp = 0;
 
   for (int i = 0; str[i] != '\0'; i++) {
-    if (isOperator(str[i])) {
+    if (str[i] == '+' || str[i] == '-' || str[i] == '*' || str[i] == '/') {
       tempFloat[termsIndex] = '\0';
       termsIndex = 0;
       secondVal = decimalCharToFloat(tempFloat);
@@ -324,19 +240,15 @@ void solveArithmetic(char* str) {
 void solveParentheses(char* str) {
   int startingIndex;
   int endingIndex = 0;
-  char tempString[32] = "";
+  char tempString[INPUT_LEN] = "";
 
   while (str[endingIndex] != ')') {
     endingIndex++;
   }
   startingIndex = endingIndex;
-  //Serial.print("ending index:");
-  //Serial.println(endingIndex);
   while (str[startingIndex] != '(') {
     startingIndex--;
   }
-  //Serial.print("starting index:");
-  //Serial.println(startingIndex);
 
   int j = 0;
   for (int i = startingIndex+1; i < endingIndex; i++) {
@@ -348,7 +260,7 @@ void solveParentheses(char* str) {
   solveArithmetic(tempString);
 
   int m = 0;
-  char substitute[32];
+  char substitute[INPUT_LEN];
   for (int l = 0; l < startingIndex; l++) {
     substitute[m] = str[l];
     m++;
@@ -381,10 +293,10 @@ void dollarSignDoublePar(char* str) { //Replaces expression in $(( )) with the s
     int expCheck2 = indexOf(str, "))");
     if (expCheck2 != -1) {
       int j = 0;
-      char cmdOld[32] = "";
-      strncpy(cmdOld, str, 31);
-      char exp[32] = "";
-      exp[31] = '\0';
+      char cmdOld[INPUT_LEN] = "";
+      strcpy(cmdOld, str);
+      char exp[INPUT_LEN] = "";
+      exp[INPUT_LEN-1] = '\0';
 
       for (int i = expCheck + 2; i <= expCheck2; i++) { //Copy text in parentheses to exp
         exp[j] = str[i];
@@ -393,7 +305,6 @@ void dollarSignDoublePar(char* str) { //Replaces expression in $(( )) with the s
       exp[j] = '\0';
 
       variableSubstitute(exp);
-      Serial.println(exp);
 
       while (containsParentheses(exp) == 1) {
         solveParentheses(exp);
@@ -427,25 +338,65 @@ void dollarSignDoublePar(char* str) { //Replaces expression in $(( )) with the s
   }
 }
 
+void setup() {
+  Serial.begin(115200);
+
+  if (!SD.begin(chipSelect)) {
+    Serial.println("SD card initialization failed");
+    while (true);
+  }
+
+  Serial.println(F("\n--- SDLookingGlass v1.0 ---"));
+  Serial.println(F("Type 'help' for commands"));
+  printPrompt();
+}
+
+void loop() {
+  if (Serial.available() > 0) {
+    char c = Serial.read();
+    if (c == '\r' || c == '\n') { //Enter
+      if (inputLen > 0) {
+        inputBuffer[inputLen] = '\0';
+        Serial.println();
+        executeCommand(inputBuffer);
+        inputLen = 0;
+        memset(inputBuffer, 0, INPUT_LEN);
+        printPrompt();
+      } else {
+        
+        Serial.println();
+        printPrompt();
+      }
+    }
+    else if (c == 8 || c == 127) { //Backspace
+      if (inputLen > 0) {
+        inputLen--;
+        inputBuffer[inputLen] = '\0';
+        Serial.print(F("\b \b"));
+      }
+    }
+    else if (inputLen < INPUT_LEN-1) {
+      Serial.print(c);
+      inputBuffer[inputLen] = c;
+      inputLen++;
+    }
+  }
+}
+
 void runScript(const char* content);
 
 void executeCommand(char* line) {
-  char cmd[32] = "";
-  char args[32] = "";
-  int space1 = -1;
-  int i, sp, pin, count;
-  char buf[40];
+  char cmd[INPUT_LEN] = "";
+  char args[INPUT_LEN] = "";
 
-  strncpy(cmd, line, 31);
-  cmd[31] = '\0';
+  strcpy(cmd, line);
 
   dollarSignDoublePar(cmd);
 
-  for (i = 0; cmd[i] != '\0'; i++) { //Break up the input into command (everything before first space) and arguments
+  for (int i = 0; cmd[i] != '\0'; i++) { //Break up the input into command (everything before first space) and arguments
     if (cmd[i] == ' ') {
-      space1 = i;
-      strncpy(args, cmd + i + 1, 31);
-      args[31] = '\0';
+      strcpy(args, cmd + i + 1);
+      args[INPUT_LEN-1] = '\0';
       cmd[i] = '\0';
       break;
     }
@@ -482,9 +433,6 @@ void executeCommand(char* line) {
   }
   else if (strcmp_P(cmd, PSTR("mkdir")) == 0) {
     char dirPath[NAME_LEN + PATH_LEN];
-    /*strcpy(dirPath, currentPath);
-    strcat(dirPath, "/");
-    strcat(dirPath, args);*/
 
     if (strcmp_P(currentPath, PSTR("/")) == 0) {
       strcpy(dirPath, args);
@@ -507,16 +455,12 @@ void executeCommand(char* line) {
   }
   else if (strcmp_P(cmd, PSTR("cd")) == 0) {
     if (strcmp_P(args, PSTR("..")) == 0 || strcmp_P(args, PSTR("/")) == 0) { //Move back to top directory
-      strncpy(currentPath, "/", PATH_LEN - 1);
+      strcpy(currentPath, "/");
       currentPath[PATH_LEN - 1] = '\0';
     } else {
       int found = 0;
-      //toUppercase(args);
 
       File dir = SD.open(currentPath);
-
-      //Serial.print("Looking for: ");
-      //Serial.println(args);
 
       while (true) {
         File entry =  dir.openNextFile();
@@ -526,9 +470,6 @@ void executeCommand(char* line) {
           break;
         }
 
-        //Serial.print("Checking: ");
-        //Serial.println(entry.name());
-
         if (entry.isDirectory() && strcmp(args, entry.name()) == 0) {
           found = 1;
         }
@@ -537,7 +478,7 @@ void executeCommand(char* line) {
 
       if (found) {
         if (!safeConcatPath(currentPath, args)) {
-          strncpy(currentPath, "/", PATH_LEN - 1);
+          strcpy(currentPath, "/");
           currentPath[PATH_LEN - 1] = '\0';
           Serial.println(F("Path too long."));
           return;
@@ -559,21 +500,12 @@ void executeCommand(char* line) {
       strncpy(text, args, arrow);
       text[arrow] = '\0';
       char filename[12] = "";
-      strncpy(filename, args + arrow + 3, NAME_LEN - 1);
+      strcpy(filename, args + arrow + 3);
       filename[NAME_LEN - 1] = '\0';
       char newfilepath[PATH_LEN] = "";
-      strncpy(newfilepath, currentPath, PATH_LEN - 1);
-
-      //Serial.print(F("newfilepath before concat: "));
-      //Serial.println(newfilepath);
-
-      //Serial.print(F("filename before concat: "));
-      //Serial.println(filename);
+      strcpy(newfilepath, currentPath);
 
       strcat(newfilepath, filename);
-
-      //Serial.print(F("newfilepath after concat: "));
-      //Serial.println(newfilepath);
 
       File dataFile = SD.open(newfilepath, FILE_WRITE);
 
@@ -589,10 +521,8 @@ void executeCommand(char* line) {
     }
   }
   else if (strcmp_P(cmd, PSTR("cat")) == 0) {
-    //toUppercase(args);
-
     char newfilepath[PATH_LEN] = "";
-    strncpy(newfilepath, currentPath, PATH_LEN - 1);
+    strcpy(newfilepath, currentPath);
     strcat(newfilepath, args);
 
     File myFile = SD.open(newfilepath);
@@ -606,7 +536,6 @@ void executeCommand(char* line) {
     }
   }
   else if (strcmp_P(cmd, PSTR("info")) == 0) {
-    //toUppercase(args);
     File myFile = SD.open(args);
     if (myFile) {
       Serial.print(F("Name: ")); Serial.println(myFile.name());
@@ -618,7 +547,6 @@ void executeCommand(char* line) {
     myFile.close();
   }
   else if (strcmp_P(cmd, PSTR("rm")) == 0) {
-    //toUppercase(args);
     char filePath[NAME_LEN + PATH_LEN];
     if (strcmp_P(currentPath, PSTR("/")) == 0) {
       strcpy(filePath, args);
@@ -692,9 +620,8 @@ void executeCommand(char* line) {
       return;
     }
 
-    char script[32];
+    char script[INPUT_LEN];
 
-    //toUppercase(args);
     File myFile = SD.open(args);
     if (myFile) {
       addDmesg(F("sh: running script"));
@@ -704,7 +631,7 @@ void executeCommand(char* line) {
         j++;
       }
       myFile.close();
-      script[31] = '\0';
+      script[INPUT_LEN-1] = '\0';
       runScript(script);
     } else {
       Serial.println(F("Script not found."));
@@ -752,9 +679,9 @@ void executeCommand(char* line) {
           }
         }
         if (slot == -1) { Serial.println(F("Alias table full.")); return; }
-        strncpy(aliases[slot].name, aname, ALIAS_NAME_LEN - 1);
+        strncpy(aliases[slot].name, aname, ALIAS_NAME_LEN);
         aliases[slot].name[ALIAS_NAME_LEN - 1] = '\0';
-        strncpy(aliases[slot].value, aval, ALIAS_VAL_LEN - 1);
+        strncpy(aliases[slot].value, aval, ALIAS_VAL_LEN);
         aliases[slot].value[ALIAS_VAL_LEN - 1] = '\0';
         aliases[slot].active = 1;
         Serial.println(F("Alias set."));
@@ -789,8 +716,6 @@ void executeCommand(char* line) {
     Serial.println(F(" "));
   }
   else if (strcmp_P(cmd, PSTR("unset")) == 0) {
-    //Serial.println(F("debug"));
-    //Serial.println(args);
     int found = 0;
 
     for (int i = 0; i < varIndex; i++) {
@@ -809,17 +734,16 @@ void executeCommand(char* line) {
     }
   }
   else {
-    // check alias
-    int j, resolved = 0;
+    int j, resolved = 0; //Check alias
     for (j = 0; j < MAX_ALIASES; j++) {
       if (aliases[j].active && strcmp(aliases[j].name, cmd) == 0) {
-        char aliasLine[32] = "";
-        strncpy(aliasLine, aliases[j].value, 31);
-        aliasLine[31] = '\0';
+        char aliasLine[INPUT_LEN] = "";
+        strcpy(aliasLine, aliases[j].value);
+        aliasLine[INPUT_LEN-1] = '\0';
         if (args[0] != '\0') {
           int al = strlen(aliasLine);
-          if (al < 30) { aliasLine[al] = ' '; aliasLine[al+1] = '\0'; }
-          strncat(aliasLine, args, 31 - strlen(aliasLine));
+          if (al < (INPUT_LEN-2)) { aliasLine[al] = ' '; aliasLine[al+1] = '\0'; }
+          strncat(aliasLine, args, (INPUT_LEN-1) - strlen(aliasLine));
         }
         executeCommand(aliasLine);
         resolved = 1;
@@ -827,14 +751,13 @@ void executeCommand(char* line) {
       }
     }
 
-    //Check for variables being set
-    int eqCheck = indexOf(cmd, "=");
+    int eqCheck = indexOf(cmd, "="); //Check for variables being set
     if (eqCheck != -1) {
       resolved = 1;
-      char varName[32] = "";
+      char varName[INPUT_LEN] = "";
       strncpy(varName, cmd, eqCheck);
 
-      char varVal[32] = "";
+      char varVal[INPUT_LEN] = "";
       int j = 0;
       for (int i = eqCheck + 1; i < 31; i++) {
         varVal[j] = cmd[i];
@@ -862,12 +785,12 @@ void executeCommand(char* line) {
         }
       }
 
-      //Serial.println(F("All current vars:"));
-      //for (int i = 0; i < varIndex; i++) {
-      //  Serial.print(vars[i].name);
-      //  Serial.print(": ");
-      //  Serial.println(vars[i].value);
-      //}
+      /*Serial.println(F("All current vars:"));
+      for (int i = 0; i < varIndex; i++) {
+        Serial.print(vars[i].name);
+        Serial.print(": ");
+        Serial.println(vars[i].value);
+      }*/
     }
     if (!resolved) Serial.println(F("Unknown command."));
   }
@@ -875,7 +798,7 @@ void executeCommand(char* line) {
 
 // Interpreter sh
 void runScript(const char* content) {
-  char line[32];
+  char line[INPUT_LEN];
   int ci = 0, li = 0, lineNum = 0;
   int len = strlen(content);
 
@@ -892,7 +815,7 @@ void runScript(const char* content) {
         li = 0;
       }
     } else {
-      if (li < 31) line[li++] = c;
+      if (li < INPUT_LEN-1) line[li++] = c;
     }
   }
   addDmesg(F("sh: script done"));
