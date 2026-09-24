@@ -1,4 +1,6 @@
 #include <SD.h>
+#include <Adafruit_SH110X.h>
+#include <PS2KeyAdvanced.h>
 
 const int chipSelect = BUILTIN_SDCARD;
 
@@ -38,6 +40,29 @@ typedef struct {
 } shVariable;
 shVariable vars[VAR_SPACES];
 int varIndex = 0;
+
+#define OLED_MOSI     10
+#define OLED_CLK      8
+#define OLED_DC       7
+#define OLED_CS       5
+#define OLED_RST      9
+Adafruit_SH1106G display = Adafruit_SH1106G(128, 64,OLED_MOSI, OLED_CLK, OLED_DC, OLED_RST, OLED_CS);
+#define COLS 21
+#define ROWS 8
+
+#define DataPin 13
+#define IRQpin 14
+PS2KeyAdvanced keyboard;
+#define MAX_LEN 550 //There are usually around 400,000 bytes free in RAM1 for this but don't push it
+char fileBuffer[MAX_LEN] = "Alfred Nobel invented Dynamite; he made a fortune manufacturing and selling deadly weapons, canons and armaments. In 1888, his brother Ludvig died, but many newspapers mistakenly thought that he had died and published obituaries for Alfred Nobel, they weren't very flattering, one French paper declared the \"merchant of death is dead.\" Nobel read these obituaries and was so ashamed by what his legacy apparently was going to be. When he did die, he left almost all of his money to the cause of celebrating humanity, he created the Nobel Prize.";
+const int linesEstimation = floor(MAX_LEN/3);
+int lineStarts[linesEstimation];
+int persistentCursor = 0;
+char clipboard[MAX_LEN];
+int clipboardLen = 0;
+int apparentLine = 0;
+int screenLine;
+int saveState = 1;
 
 float freeMemory() {
   Sd2Card card;
@@ -338,8 +363,484 @@ void dollarSignDoublePar(char* str) { //Replaces expression in $(( )) with the s
   }
 }
 
+void wrapText(char* str) {
+  int count = 0;
+  int prevSpace = 0;
+  int lineCount = 1;
+  lineStarts[0] = 0;
+  int i;
+
+  for (i = 0; str[i] != '\0'; i++) {
+    if (str[i] == ' ') {
+      prevSpace = i;
+    }
+    if (count >= COLS && count - prevSpace < COLS && prevSpace != 0) {
+      str[prevSpace] = 0x0D; //A special character is used for newlines in wrapText, so that newlines typed in the text by the user can be preserved
+      lineStarts[lineCount] = prevSpace + 1;
+      lineCount++;
+      i = prevSpace;
+      count = -1;
+    }
+    if (str[i] == '\n') {
+      lineStarts[lineCount] = i + 1;
+      lineCount++;
+      count = -1;
+    }
+    count++;
+  }
+  str[i] = '\0';
+  lineStarts[lineCount] = i+1;
+  lineStarts[lineCount+1] = -1;
+  if (lineCount < ROWS) {
+    screenLine = lineCount;
+  } else {
+    screenLine = ROWS;
+  }
+}
+
+void unwrapText(char* str) {
+  int i;
+
+  for (i = 0; str[i] != '\0'; i++) {
+    if (str[i] == 0x0D) {
+      str[i] = ' ';
+    }
+  }
+  str[i] = '\0';
+}
+
+void printSection(char* str, int start, int end) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SH110X_WHITE);
+  display.setCursor(0, 0);
+  for (int i = start; i < end; i++) {
+    if (str[i] == 0x0D) { //A special character is used for newlines in wrapText, so that newlines typed in the text by the user can be preserved
+      display.println("");
+    } else {
+      display.print(str[i]);
+    }
+  }
+  display.display();
+}
+
+void keyboardEdit(char* str, char* saveFilePath) {
+  int printing;
+  uint16_t ps2;
+  char c;
+  int highlighting = 0;
+  int highlightEnd;
+
+  int currentLen;
+  for (currentLen = 0; str[currentLen] != '\0'; currentLen++) {}
+  int cursor;
+  if (persistentCursor > currentLen) {
+    cursor = 0;
+  } else {
+    cursor = persistentCursor;
+  }
+
+  insInString(str,  '|', cursor);
+  wrapText(str);
+  printSection(str, lineStarts[0], lineStarts[0+screenLine]-1);
+  unwrapText(str);
+  backspaceChar(str, cursor);
+
+  while (true) {
+    if (keyboard.available()) {
+      // read the next key
+      ps2 = keyboard.read();
+      c = codesToAscii(ps2);
+      printing = 1;
+    
+      if (c != 0) {
+        if (highlighting == 1) {
+          saveState = 0;
+          deleteSeg(str, highlightEnd, cursor, c);
+          currentLen = currentLen + 1 - abs(highlightEnd - cursor);
+          if (cursor > highlightEnd) {
+            cursor = highlightEnd;
+          }
+          cursor++;
+          highlighting = 0;
+        } else {
+          if (currentLen+1 <= MAX_LEN-1) {
+            saveState = 0;
+            insInString(str, c, cursor);
+            currentLen++;
+            cursor++;
+          } else {
+            Serial.println("Buffer full");
+            printing = 0;
+          }
+        }
+      } else if (ps2 == 0x115) { //Left arrow
+        if (highlighting == 1) {
+          if (highlightEnd <= cursor) {
+            cursor = highlightEnd;
+          }
+          highlighting = 0;
+        } else if (cursor > 0) {
+          cursor--;
+        }
+      } else if (ps2 == 0x116) { //Right arrow
+        if (highlighting == 1) {
+          if (highlightEnd > cursor) {
+            cursor = highlightEnd;
+          }
+          highlighting = 0;
+        } else if (cursor < currentLen) {
+          cursor++;
+        }
+      } else if (ps2 == 0x117) { //Up arrow
+        if (absoluteLine(cursor) > 0) {
+          int spacing = lineStarts[absoluteLine(cursor)-1] + cursor - lineStarts[absoluteLine(cursor)];
+          cursor = spacing;
+        }
+      } else if (ps2 == 0x118) { //Down arrow
+        int spacing = lineStarts[absoluteLine(cursor)+1] + cursor - lineStarts[absoluteLine(cursor)];
+        if (spacing <= currentLen) {
+          cursor = spacing-1;
+        }
+      } else if (ps2 == 0x11C) { //Backspace
+        saveState = 0;
+        if (highlighting == 1) {
+          deleteSeg(str, highlightEnd, cursor, 0);
+          currentLen = currentLen - abs(highlightEnd - cursor);
+          if (cursor > highlightEnd) {
+            cursor = highlightEnd;
+          }
+          highlighting = 0;
+        } else if (cursor > 0) {
+          backspaceChar(str, cursor-1);
+          cursor--;
+          currentLen--;
+        }
+      } else if (ps2 == 0x2115) { //Ctrl + left arrow
+        if (highlighting == 0) {
+          highlightEnd = cursor;
+        }
+        if (cursor > 0) {
+          cursor--;
+        }
+        highlighting = 1;
+      } else if (ps2 == 0x2116) { //Ctrl + right arrow
+        if (highlighting == 0) {
+          highlightEnd = cursor;
+        }
+        if (cursor < currentLen) {
+          cursor++;
+        }
+        highlighting = 1;
+      } else if (ps2 == 0x2041) { //Ctrl + a
+        highlightEnd = 0;
+        cursor = currentLen;
+        highlighting = 1;
+      } else if ((ps2 == 0x2043) && highlighting) { //Ctrl + c
+        copySeg(clipboard, highlightEnd, cursor, str);
+        clipboardLen = abs(highlightEnd - cursor);
+        printing = 0;
+      } else if ((ps2 == 0x2058) && highlighting) { //Ctrl + x
+        saveState = 0;
+        copySeg(clipboard, highlightEnd, cursor, str);
+        clipboardLen = abs(highlightEnd - cursor);
+        deleteSeg(str, highlightEnd, cursor, 0);
+        currentLen = currentLen - abs(highlightEnd - cursor);
+        if (cursor > highlightEnd) {
+          cursor = highlightEnd;
+        }
+        highlighting = 0;
+      } else if (ps2 == 0x2056) { //Ctrl + v
+        if (highlighting == 1) {
+          deleteSeg(str, highlightEnd, cursor, 0);
+          currentLen = currentLen - abs(highlightEnd - cursor);
+          if (cursor > highlightEnd) {
+            cursor = highlightEnd;
+          }
+          highlighting = 0;
+        }
+
+        if (currentLen+clipboardLen <= MAX_LEN-1) {
+          saveState = 0;
+          for (int i = 0; i < clipboardLen; i++) {
+            insInString(str, clipboard[i], cursor);
+            currentLen++;
+            cursor++;
+          }
+        } else {
+          Serial.println("Buffer full");
+          printing = 0;
+        }
+      } else if (ps2 == 0x2053) { //Ctrl + s
+        if (saveState == 0) {
+          saveState = 1;
+          SD.remove(saveFilePath);
+          File myFile = SD.open(saveFilePath, FILE_WRITE);
+          if (myFile) {
+            myFile.println(str);
+            myFile.close();
+          } else {
+            Serial.println("error opening file");
+          }
+        }
+      } else if (ps2 == 0x011E) { //Enter
+        if (highlighting == 1) {
+          deleteSeg(str, highlightEnd, cursor, '\n');
+          currentLen = currentLen + 1 - abs(highlightEnd - cursor);
+          if (cursor > highlightEnd) {
+            cursor = highlightEnd;
+          }
+          cursor++;
+          highlighting = 0;
+        } else {
+          if (currentLen+1 <= MAX_LEN-1) {
+            saveState = 0;
+            insInString(str, '\n', cursor);
+            currentLen++;
+            cursor++;
+          } else {
+            Serial.println("Buffer full");
+            printing = 0;
+          }
+        }
+      } else if (ps2 == 0x0964) { //Alt+F4
+        if (saveState == 0) {
+          Serial.println("unsaved");
+        }
+        persistentCursor = cursor;
+        return;
+      } else {
+        printing = 0;
+      }
+
+      if (printing) {
+        if (highlighting) {
+          if (cursor > highlightEnd) { 
+            highlightString(str, highlightEnd, cursor+1);
+            wrapText(str);
+            if (absoluteLine(cursor)-ROWS+1 > apparentLine) {
+              apparentLine++;
+            } else if (absoluteLine(cursor) < apparentLine) {
+              apparentLine--;
+            }
+            printSection(str, lineStarts[apparentLine], lineStarts[apparentLine+screenLine]-1);
+            unwrapText(str);
+            backspaceChar(str, cursor+1);
+            backspaceChar(str, highlightEnd);
+          } else {
+            highlightString(str, highlightEnd+1, cursor);
+            wrapText(str);
+            if (absoluteLine(highlightEnd)-ROWS+1 > apparentLine) {
+              apparentLine++;
+            } else if (absoluteLine(highlightEnd) < apparentLine) {
+              apparentLine--;
+            }
+            printSection(str, lineStarts[apparentLine], lineStarts[apparentLine+screenLine]-1);
+            unwrapText(str);
+            backspaceChar(str, highlightEnd+1);
+            backspaceChar(str, cursor);
+          }
+        } else {
+          insInString(str, '|', cursor);
+          wrapText(str);
+          if (absoluteLine(cursor)-ROWS+1 > apparentLine) {
+            apparentLine++;
+          } else if (absoluteLine(cursor) < apparentLine) {
+            apparentLine--;
+          }
+          printSection(str, lineStarts[apparentLine], lineStarts[apparentLine+screenLine]-1);
+          unwrapText(str);
+          backspaceChar(str, cursor);
+        }
+      }
+    }
+  }
+}
+
+void insInString(char* str, char charIn, int pos) {
+  char nextChar = charIn;
+  char overwrittenChar;
+  int i;
+
+  for (i = pos; str[i] != '\0'; i++) {
+    overwrittenChar = str[i];
+    str[i] = nextChar;
+    nextChar = overwrittenChar;
+  }
+  str[i] = nextChar;
+  str[i+1] = '\0';
+}
+
+char codesToAscii(uint16_t in) {
+  char out;
+
+  uint16_t status = in >> 8;
+  out = in & 0xFF;
+
+  if ((status & 0x80) == 0x80) { //Prevents from returning break key signals
+    return 0;
+  }
+
+  //Serial.println(" ");
+  //Serial.print("Status Bits: ");
+  //Serial.println(status, HEX);
+  //Serial.print("Code: ");
+  //Serial.println(out, HEX);
+
+  if ((status & 0x20) == 0x20) { //Ctrl key
+    return 0;
+  }
+
+  if ((status & 0x08) == 0x08) { //Alt key
+    return 0;
+  }
+
+  if (in == 0x11F) {
+    return ' ';
+  } else if (in == 0x3B) {
+    return ',';
+  } else if (in == 0x3D) {
+    return '.';
+  } else if (in == 0x4031) {
+    return '!';
+  } else if (in == 0x4032) {
+    return '@';
+  } else if (in == 0x4033) {
+    return '#';
+  } else if (in == 0x4034) {
+    return '$';
+  } else if (in == 0x4035) {
+    return '%';
+  } else if (in == 0x4036) {
+    return '^';
+  } else if (in == 0x4037) {
+    return '&';
+  } else if (in == 0x4038) {
+    return '*';
+  } else if (in == 0x4039) {
+    return '(';
+  } else if (in == 0x4030) {
+    return ')';
+  } else if (in == 0x3E) {
+    return '/';
+  } else if (in == 0x403E) {
+    return '?';
+  } else if (in == 0x5B) {
+    return ';';
+  } else if (in == 0x405B) {
+    return ':';
+  } else if (in == 0x3A) {
+    return 0x27;
+  } else if (in == 0x403A) {
+    return 0x22;
+  } else if (in == 0x405D) {
+    return '{';
+  } else if (in == 0x405E) {
+    return '}';
+  } else if (in == 0x3C) {
+    return '-';
+  } else if (in == 0x403C) {
+    return '_';
+  } else if (in == 0x5F) {
+    return '=';
+  } else if (in == 0x405F) {
+    return '+';
+  } else if (in == 0x5C) {
+    return 0x5C;
+  }
+
+  if (!(out > 31 && out < 128)) { //Except for cases above, only returns alphanumeric characters
+    return 0;
+  }
+
+  if (((status & 0x40) != 0x40) && (out >= 65 && out <= 90)) {
+    out = out + ('a' - 'A');
+  }
+
+  return out;
+}
+
+void deleteSeg(char* str, int startPos, int endPos, char in) {
+  int i;
+  int greater;
+  int width = abs(startPos - endPos);
+
+  if (startPos > endPos) {
+    greater = startPos;
+  } else {
+    greater = endPos;
+  }
+
+  if (in != 0) {
+    str[greater-width] = in;
+    width--;
+  }
+
+  for (i = greater; str[i] != '\0'; i++) {
+    str[i-width] = str[i];
+  }
+  str[i-width] = '\0';
+}
+
+void backspaceChar(char* str, int pos) {
+  char nextChar;
+
+  for (int i = pos; str[i] != '\0'; i++) {
+    nextChar = str[i+1];
+    str[i] = nextChar;
+  }
+}
+
+void copySeg(char* strOut, int startPos, int endPos, char* strIn) {
+  int j = 0;
+  int leftPos;
+  int rightPos;
+
+  if (startPos > endPos) {
+    leftPos = endPos;
+    rightPos = startPos;
+  } else {
+    rightPos = endPos;
+    leftPos = startPos;
+  }
+
+  for (int i = leftPos; i < rightPos; i++) {
+    strOut[j] = strIn[i];
+    j++;
+  }
+  strOut[j] = '\0';
+}
+
+void highlightString(char* str, int startPos, int endPos) {
+  int leftPos;
+  int rightPos;
+
+  if (startPos > endPos) {
+    leftPos = endPos;
+    rightPos = startPos;
+  } else {
+    rightPos = endPos;
+    leftPos = startPos;
+  }
+
+  insInString(str, '[', leftPos);
+  insInString(str, ']', rightPos);
+}
+
+int absoluteLine(int strPoint) {
+  int i;
+  for (i = 0; lineStarts[i] <= strPoint; i++) {}
+  return i-1;
+}
+
 void setup() {
   Serial.begin(115200);
+  display.begin(0, true);
+  display.display();
+  delay(2000);
+  display.clearDisplay();
+  display.display();
+  keyboard.begin(DataPin, IRQpin);
 
   if (!SD.begin(chipSelect)) {
     Serial.println("SD card initialization failed");
@@ -733,7 +1234,30 @@ void executeCommand(char* line) {
       Serial.println(F("Variable not found"));
     }
   }
-  else {
+  else if (strcmp_P(cmd, PSTR("notepad")) == 0) {
+    char newfilepath[PATH_LEN] = "";
+    strcpy(newfilepath, currentPath);
+    strcat(newfilepath, args);
+
+    File myFile = SD.open(newfilepath);
+    int i = 0;
+    if (myFile) {
+      while (myFile.available() && i < MAX_LEN) {
+        fileBuffer[i] = myFile.read();
+        i++;
+      }
+      myFile.close();
+      fileBuffer[i] = '\0';
+      keyboardEdit(fileBuffer, newfilepath);
+      wrapText(fileBuffer);
+      printSection(fileBuffer, lineStarts[0], lineStarts[0+screenLine]-1);
+      unwrapText(fileBuffer);
+      display.clearDisplay();
+      display.display();
+    } else {
+      Serial.println("error opening file");
+    }
+  } else {
     int j, resolved = 0; //Check alias
     for (j = 0; j < MAX_ALIASES; j++) {
       if (aliases[j].active && strcmp(aliases[j].name, cmd) == 0) {
