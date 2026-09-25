@@ -623,6 +623,9 @@ void keyboardEdit(char* str, char* saveFilePath) {
             } else if (absoluteLine(cursor) < apparentLine) {
               apparentLine--;
             }
+            if (lineStarts[apparentLine+screenLine] < 0) {
+              apparentLine--;
+            }
             printSection(str, lineStarts[apparentLine], lineStarts[apparentLine+screenLine]-1);
             unwrapText(str);
             backspaceChar(str, cursor+1);
@@ -633,6 +636,9 @@ void keyboardEdit(char* str, char* saveFilePath) {
             if (absoluteLine(highlightEnd)-ROWS+1 > apparentLine) {
               apparentLine++;
             } else if (absoluteLine(highlightEnd) < apparentLine) {
+              apparentLine--;
+            }
+            if (lineStarts[apparentLine+screenLine] < 0) {
               apparentLine--;
             }
             printSection(str, lineStarts[apparentLine], lineStarts[apparentLine+screenLine]-1);
@@ -646,6 +652,9 @@ void keyboardEdit(char* str, char* saveFilePath) {
           if (absoluteLine(cursor)-ROWS+1 > apparentLine) {
             apparentLine++;
           } else if (absoluteLine(cursor) < apparentLine) {
+            apparentLine--;
+          }
+          if (lineStarts[apparentLine+screenLine] < 0) {
             apparentLine--;
           }
           printSection(str, lineStarts[apparentLine], lineStarts[apparentLine+screenLine]-1);
