@@ -60,8 +60,8 @@ int lineStarts[linesEstimation];
 int persistentCursor = 0;
 char clipboard[MAX_LEN];
 int clipboardLen = 0;
-int apparentLine = 0;
-int screenLine;
+int topLineOfScreen = 0;
+int onscreenLineCount;
 int saveState = 1;
 
 float freeMemory() {
@@ -392,9 +392,9 @@ void wrapText(char* str) {
   lineStarts[lineCount] = i+1;
   lineStarts[lineCount+1] = -1;
   if (lineCount < ROWS) {
-    screenLine = lineCount;
+    onscreenLineCount = lineCount;
   } else {
-    screenLine = ROWS;
+    onscreenLineCount = ROWS;
   }
 }
 
@@ -415,12 +415,15 @@ void printSection(char* str, int start, int end) {
   display.setTextColor(SH110X_WHITE);
   display.setCursor(0, 0);
   for (int i = start; i < end; i++) {
+    //Serial.print(str[i], HEX);
+    //Serial.print(" ");
     if (str[i] == 0x0D) { //A special character is used for newlines in wrapText, so that newlines typed in the text by the user can be preserved
       display.println("");
     } else {
       display.print(str[i]);
     }
   }
+  //Serial.println("");
   display.display();
 }
 
@@ -442,7 +445,7 @@ void keyboardEdit(char* str, char* saveFilePath) {
 
   insInString(str,  '|', cursor);
   wrapText(str);
-  printSection(str, lineStarts[0], lineStarts[0+screenLine]-1);
+  printSection(str, lineStarts[0], lineStarts[0+onscreenLineCount]-1);
   unwrapText(str);
   backspaceChar(str, cursor);
 
@@ -614,34 +617,34 @@ void keyboardEdit(char* str, char* saveFilePath) {
       }
 
       if (printing) {
+        if (topLineOfScreen + onscreenLineCount + -1 > absoluteLine(currentLen)) {
+          while (topLineOfScreen + onscreenLineCount + -1 > absoluteLine(currentLen)) {
+            topLineOfScreen--;
+          }
+        }
+
         if (highlighting) {
           if (cursor > highlightEnd) { 
             highlightString(str, highlightEnd, cursor+1);
             wrapText(str);
-            if (absoluteLine(cursor)-ROWS+1 > apparentLine) {
-              apparentLine++;
-            } else if (absoluteLine(cursor) < apparentLine) {
-              apparentLine--;
+            if (absoluteLine(cursor)-ROWS+1 > topLineOfScreen) {
+              topLineOfScreen++;
+            } else if (absoluteLine(cursor) < topLineOfScreen) {
+              topLineOfScreen--;
             }
-            if (lineStarts[apparentLine+screenLine] < 0) {
-              apparentLine--;
-            }
-            printSection(str, lineStarts[apparentLine], lineStarts[apparentLine+screenLine]-1);
+            printSection(str, lineStarts[topLineOfScreen], lineStarts[topLineOfScreen+onscreenLineCount]-1);
             unwrapText(str);
             backspaceChar(str, cursor+1);
             backspaceChar(str, highlightEnd);
           } else {
             highlightString(str, highlightEnd+1, cursor);
             wrapText(str);
-            if (absoluteLine(highlightEnd)-ROWS+1 > apparentLine) {
-              apparentLine++;
-            } else if (absoluteLine(highlightEnd) < apparentLine) {
-              apparentLine--;
+            if (absoluteLine(highlightEnd)-ROWS+1 > topLineOfScreen) {
+              topLineOfScreen++;
+            } else if (absoluteLine(highlightEnd) < topLineOfScreen) {
+              topLineOfScreen--;
             }
-            if (lineStarts[apparentLine+screenLine] < 0) {
-              apparentLine--;
-            }
-            printSection(str, lineStarts[apparentLine], lineStarts[apparentLine+screenLine]-1);
+            printSection(str, lineStarts[topLineOfScreen], lineStarts[topLineOfScreen+onscreenLineCount]-1);
             unwrapText(str);
             backspaceChar(str, highlightEnd+1);
             backspaceChar(str, cursor);
@@ -649,15 +652,15 @@ void keyboardEdit(char* str, char* saveFilePath) {
         } else {
           insInString(str, '|', cursor);
           wrapText(str);
-          if (absoluteLine(cursor)-ROWS+1 > apparentLine) {
-            apparentLine++;
-          } else if (absoluteLine(cursor) < apparentLine) {
-            apparentLine--;
+          if (absoluteLine(cursor)-ROWS+1 > topLineOfScreen) {
+            topLineOfScreen++;
+          } else if (absoluteLine(cursor) < topLineOfScreen) {
+            topLineOfScreen--;
           }
-          if (lineStarts[apparentLine+screenLine] < 0) {
-            apparentLine--;
+          if (lineStarts[topLineOfScreen+onscreenLineCount] < 0) {
+            topLineOfScreen--;
           }
-          printSection(str, lineStarts[apparentLine], lineStarts[apparentLine+screenLine]-1);
+          printSection(str, lineStarts[topLineOfScreen], lineStarts[topLineOfScreen+onscreenLineCount]-1);
           unwrapText(str);
           backspaceChar(str, cursor);
         }
@@ -1253,13 +1256,19 @@ void executeCommand(char* line) {
     if (myFile) {
       while (myFile.available() && i < MAX_LEN) {
         fileBuffer[i] = myFile.read();
+        if (i >= 3) {
+          if (fileBuffer[i-3] == 0x20 && fileBuffer[i-2] == 0x0A && fileBuffer[i-1] == 0x0D && fileBuffer[i] == 0x0A) { //I get this series of chars at the end of files saved in FeatherPad. They add extra spaces to the end of the text, and if you try to delete them it makes the screen go blank, so this replaces them when the file is loaded
+            i = i - 3;
+            break;
+          }
+        }
         i++;
       }
       myFile.close();
       fileBuffer[i] = '\0';
       keyboardEdit(fileBuffer, newfilepath);
       wrapText(fileBuffer);
-      printSection(fileBuffer, lineStarts[0], lineStarts[0+screenLine]-1);
+      printSection(fileBuffer, lineStarts[0], lineStarts[0+onscreenLineCount]-1);
       unwrapText(fileBuffer);
       display.clearDisplay();
       display.display();
