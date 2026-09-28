@@ -64,6 +64,12 @@ int topLineOfScreen = 0;
 int onscreenLineCount;
 int saveState = 1;
 
+#define OUTPUT_LEN 256
+char outputBuffer[OUTPUT_LEN];
+const int outputLinesEstimation = floor(MAX_LEN/3);
+int outputLineStarts[outputLinesEstimation];
+char prevPrompt[2*(20 + PATH_LEN + INPUT_LEN) + OUTPUT_LEN] = "--- SDLookingGlass v1.0 ---\nType 'help' for commands\n";
+
 float freeMemory() {
   Sd2Card card;
   SdVolume volume;
@@ -363,11 +369,11 @@ void dollarSignDoublePar(char* str) { //Replaces expression in $(( )) with the s
   }
 }
 
-void wrapText(char* str) {
+void wrapText(char* str, int* globalLineStarts) {
   int count = 0;
   int prevSpace = 0;
   int lineCount = 1;
-  lineStarts[0] = 0;
+  globalLineStarts[0] = 0;
   int i;
 
   for (i = 0; str[i] != '\0'; i++) {
@@ -376,21 +382,21 @@ void wrapText(char* str) {
     }
     if (count >= COLS && count - prevSpace < COLS && prevSpace != 0) {
       str[prevSpace] = 0x0D; //A special character is used for newlines in wrapText, so that newlines typed in the text by the user can be preserved
-      lineStarts[lineCount] = prevSpace + 1;
+      globalLineStarts[lineCount] = prevSpace + 1;
       lineCount++;
       i = prevSpace;
       count = -1;
     }
     if (str[i] == '\n') {
-      lineStarts[lineCount] = i + 1;
+      globalLineStarts[lineCount] = i + 1;
       lineCount++;
       count = -1;
     }
     count++;
   }
   str[i] = '\0';
-  lineStarts[lineCount] = i+1;
-  lineStarts[lineCount+1] = -1;
+  globalLineStarts[lineCount] = i+1;
+  globalLineStarts[lineCount+1] = -1;
   if (lineCount < ROWS) {
     onscreenLineCount = lineCount;
   } else {
@@ -444,7 +450,7 @@ void keyboardEdit(char* str, char* saveFilePath) {
   }
 
   insInString(str,  '|', cursor);
-  wrapText(str);
+  wrapText(str, lineStarts);
   printSection(str, lineStarts[0], lineStarts[0+onscreenLineCount]-1);
   unwrapText(str);
   backspaceChar(str, cursor);
@@ -496,12 +502,12 @@ void keyboardEdit(char* str, char* saveFilePath) {
           cursor++;
         }
       } else if (ps2 == 0x117) { //Up arrow
-        if (absoluteLine(cursor) > 0) {
-          int spacing = lineStarts[absoluteLine(cursor)-1] + cursor - lineStarts[absoluteLine(cursor)];
+        if (absoluteLine(cursor, lineStarts) > 0) {
+          int spacing = lineStarts[absoluteLine(cursor, lineStarts)-1] + cursor - lineStarts[absoluteLine(cursor, lineStarts)];
           cursor = spacing;
         }
       } else if (ps2 == 0x118) { //Down arrow
-        int spacing = lineStarts[absoluteLine(cursor)+1] + cursor - lineStarts[absoluteLine(cursor)];
+        int spacing = lineStarts[absoluteLine(cursor, lineStarts)+1] + cursor - lineStarts[absoluteLine(cursor, lineStarts)];
         if (spacing <= currentLen) {
           cursor = spacing-1;
         }
@@ -617,8 +623,8 @@ void keyboardEdit(char* str, char* saveFilePath) {
       }
 
       if (printing) {
-        if (topLineOfScreen + onscreenLineCount + -1 > absoluteLine(currentLen)) {
-          while (topLineOfScreen + onscreenLineCount + -1 > absoluteLine(currentLen)) {
+        if (topLineOfScreen + onscreenLineCount + -1 > absoluteLine(currentLen, lineStarts)) {
+          while (topLineOfScreen + onscreenLineCount + -1 > absoluteLine(currentLen, lineStarts)) {
             topLineOfScreen--;
           }
         }
@@ -626,10 +632,10 @@ void keyboardEdit(char* str, char* saveFilePath) {
         if (highlighting) {
           if (cursor > highlightEnd) { 
             highlightString(str, highlightEnd, cursor+1);
-            wrapText(str);
-            if (absoluteLine(cursor)-ROWS+1 > topLineOfScreen) {
+            wrapText(str, lineStarts);
+            if (absoluteLine(cursor, lineStarts)-ROWS+1 > topLineOfScreen) {
               topLineOfScreen++;
-            } else if (absoluteLine(cursor) < topLineOfScreen) {
+            } else if (absoluteLine(cursor, lineStarts) < topLineOfScreen) {
               topLineOfScreen--;
             }
             printSection(str, lineStarts[topLineOfScreen], lineStarts[topLineOfScreen+onscreenLineCount]-1);
@@ -638,10 +644,10 @@ void keyboardEdit(char* str, char* saveFilePath) {
             backspaceChar(str, highlightEnd);
           } else {
             highlightString(str, highlightEnd+1, cursor);
-            wrapText(str);
-            if (absoluteLine(highlightEnd)-ROWS+1 > topLineOfScreen) {
+            wrapText(str, lineStarts);
+            if (absoluteLine(highlightEnd, lineStarts)-ROWS+1 > topLineOfScreen) {
               topLineOfScreen++;
-            } else if (absoluteLine(highlightEnd) < topLineOfScreen) {
+            } else if (absoluteLine(highlightEnd, lineStarts) < topLineOfScreen) {
               topLineOfScreen--;
             }
             printSection(str, lineStarts[topLineOfScreen], lineStarts[topLineOfScreen+onscreenLineCount]-1);
@@ -651,10 +657,10 @@ void keyboardEdit(char* str, char* saveFilePath) {
           }
         } else {
           insInString(str, '|', cursor);
-          wrapText(str);
-          if (absoluteLine(cursor)-ROWS+1 > topLineOfScreen) {
+          wrapText(str, lineStarts);
+          if (absoluteLine(cursor, lineStarts)-ROWS+1 > topLineOfScreen) {
             topLineOfScreen++;
-          } else if (absoluteLine(cursor) < topLineOfScreen) {
+          } else if (absoluteLine(cursor, lineStarts) < topLineOfScreen) {
             topLineOfScreen--;
           }
           if (lineStarts[topLineOfScreen+onscreenLineCount] < 0) {
@@ -839,10 +845,220 @@ void highlightString(char* str, int startPos, int endPos) {
   insInString(str, ']', rightPos);
 }
 
-int absoluteLine(int strPoint) {
+int absoluteLine(int strPoint, int* globalLineStarts) {
   int i;
-  for (i = 0; lineStarts[i] <= strPoint; i++) {}
+  for (i = 0; globalLineStarts[i] <= strPoint; i++) {}
   return i-1;
+}
+
+void terminalKeyboardEdit(char* strIn, char* strOut) {
+  int printing;
+  uint16_t ps2;
+  char c;
+  int highlighting = 0;
+  int highlightEnd;
+
+  int staticLen;
+  for (staticLen = 0; strIn[staticLen] != '\0'; staticLen++) {}
+
+  char str[OUTPUT_LEN + 2*INPUT_LEN];
+  strcpy(str, strIn);
+  strcat(str, strOut);
+
+  int currentLen;
+  for (currentLen = 0; str[currentLen] != '\0'; currentLen++) {}
+  int cursor = currentLen;
+
+  insInString(str,  '|', cursor);
+  wrapText(str, outputLineStarts);
+  topLineOfScreen = absoluteLine(currentLen, outputLineStarts) - onscreenLineCount + 1;
+  printSection(str, outputLineStarts[topLineOfScreen], outputLineStarts[topLineOfScreen+onscreenLineCount]-1);
+  unwrapText(str);
+  backspaceChar(str, cursor);
+
+  while (true) {
+    if (keyboard.available()) {
+      // read the next key
+      ps2 = keyboard.read();
+      c = codesToAscii(ps2);
+      printing = 1;
+    
+      if ((c != 0) && cursor >= staticLen) {
+        if (highlighting == 1) {
+          deleteSeg(str, highlightEnd, cursor, c);
+          currentLen = currentLen + 1 - abs(highlightEnd - cursor);
+          if (cursor > highlightEnd) {
+            cursor = highlightEnd;
+          }
+          cursor++;
+          highlighting = 0;
+        } else {
+          if (currentLen+1 <= MAX_LEN-1) {
+            insInString(str, c, cursor);
+            currentLen++;
+            cursor++;
+          } else {
+            Serial.println("Buffer full");
+            printing = 0;
+          }
+        }
+      } else if (ps2 == 0x115) { //Left arrow
+        if (highlighting == 1) {
+          if (highlightEnd <= cursor) {
+            cursor = highlightEnd;
+          }
+          highlighting = 0;
+        } else if (cursor > 0) {
+          cursor--;
+        }
+      } else if (ps2 == 0x116) { //Right arrow
+        if (highlighting == 1) {
+          if (highlightEnd > cursor) {
+            cursor = highlightEnd;
+          }
+          highlighting = 0;
+        } else if (cursor < currentLen) {
+          cursor++;
+        }
+      } else if (ps2 == 0x117) { //Up arrow
+        if (absoluteLine(cursor, outputLineStarts) > 0) {
+          int spacing = outputLineStarts[absoluteLine(cursor, outputLineStarts)-1] + cursor - outputLineStarts[absoluteLine(cursor, outputLineStarts)];
+          cursor = spacing;
+        }
+      } else if (ps2 == 0x118) { //Down arrow
+        int spacing = outputLineStarts[absoluteLine(cursor, outputLineStarts)+1] + cursor - outputLineStarts[absoluteLine(cursor, outputLineStarts)];
+        if (spacing <= currentLen) {
+          cursor = spacing-1;
+        }
+      } else if (ps2 == 0x11C) { //Backspace
+        if (highlighting == 1 && cursor > staticLen && highlightEnd > staticLen) {
+          deleteSeg(str, highlightEnd, cursor, 0);
+          currentLen = currentLen - abs(highlightEnd - cursor);
+          if (cursor > highlightEnd) {
+            cursor = highlightEnd;
+          }
+          highlighting = 0;
+        } else if (cursor > staticLen) {
+          backspaceChar(str, cursor-1);
+          cursor--;
+          currentLen--;
+        }
+      } else if (ps2 == 0x2115) { //Ctrl + left arrow
+        if (highlighting == 0) {
+          highlightEnd = cursor;
+        }
+        if (cursor > 0) {
+          cursor--;
+        }
+        highlighting = 1;
+      } else if (ps2 == 0x2116) { //Ctrl + right arrow
+        if (highlighting == 0) {
+          highlightEnd = cursor;
+        }
+        if (cursor < currentLen) {
+          cursor++;
+        }
+        highlighting = 1;
+      } else if (ps2 == 0x2041) { //Ctrl + a
+        highlightEnd = 0;
+        cursor = currentLen;
+        highlighting = 1;
+      } else if ((ps2 == 0x2043) && highlighting) { //Ctrl + c
+        copySeg(clipboard, highlightEnd, cursor, str);
+        clipboardLen = abs(highlightEnd - cursor);
+        printing = 0;
+      } else if ((ps2 == 0x2058) && highlighting && cursor >= staticLen && highlightEnd >= staticLen) { //Ctrl + x
+        copySeg(clipboard, highlightEnd, cursor, str);
+        clipboardLen = abs(highlightEnd - cursor);
+        deleteSeg(str, highlightEnd, cursor, 0);
+        currentLen = currentLen - abs(highlightEnd - cursor);
+        if (cursor > highlightEnd) {
+          cursor = highlightEnd;
+        }
+        highlighting = 0;
+      } else if (ps2 == 0x2056 && cursor >= staticLen) { //Ctrl + v
+        if (highlighting == 1 && highlightEnd >= staticLen) {
+          deleteSeg(str, highlightEnd, cursor, 0);
+          currentLen = currentLen - abs(highlightEnd - cursor);
+          if (cursor > highlightEnd) {
+            cursor = highlightEnd;
+          }
+          highlighting = 0;
+        }
+
+        if (currentLen+clipboardLen <= MAX_LEN-1) {
+          for (int i = 0; i < clipboardLen; i++) {
+            insInString(str, clipboard[i], cursor);
+            currentLen++;
+            cursor++;
+          }
+        } else {
+          Serial.println("Buffer full");
+          printing = 0;
+        }
+      } else if (ps2 == 0x011E) { //Enter
+        int j = 0;
+        for (int i = staticLen; str[i] != '\0'; i++) {
+          strOut[j] = str[i];
+          j++;
+        }
+        strOut[j] = '\0';
+        return;
+      } else {
+        printing = 0;
+      }
+
+      if (printing) {
+        if (topLineOfScreen + onscreenLineCount + -1 > absoluteLine(currentLen, outputLineStarts)) {
+          while (topLineOfScreen + onscreenLineCount + -1 > absoluteLine(currentLen, outputLineStarts)) {
+            topLineOfScreen--;
+          }
+        }
+
+        if (highlighting) {
+          if (cursor > highlightEnd) { 
+            highlightString(str, highlightEnd, cursor+1);
+            wrapText(str, outputLineStarts);
+            if (absoluteLine(cursor, outputLineStarts)-ROWS+1 > topLineOfScreen) {
+              topLineOfScreen++;
+            } else if (absoluteLine(cursor, outputLineStarts) < topLineOfScreen) {
+              topLineOfScreen--;
+            }
+            printSection(str, outputLineStarts[topLineOfScreen], outputLineStarts[topLineOfScreen+onscreenLineCount]-1);
+            unwrapText(str);
+            backspaceChar(str, cursor+1);
+            backspaceChar(str, highlightEnd);
+          } else {
+            highlightString(str, highlightEnd+1, cursor);
+            wrapText(str, outputLineStarts);
+            if (absoluteLine(highlightEnd, outputLineStarts)-ROWS+1 > topLineOfScreen) {
+              topLineOfScreen++;
+            } else if (absoluteLine(highlightEnd, outputLineStarts) < topLineOfScreen) {
+              topLineOfScreen--;
+            }
+            printSection(str, outputLineStarts[topLineOfScreen], outputLineStarts[topLineOfScreen+onscreenLineCount]-1);
+            unwrapText(str);
+            backspaceChar(str, highlightEnd+1);
+            backspaceChar(str, cursor);
+          }
+        } else {
+          insInString(str, '|', cursor);
+          wrapText(str, outputLineStarts);
+          if (absoluteLine(cursor, outputLineStarts)-ROWS+1 > topLineOfScreen) {
+            topLineOfScreen++;
+          } else if (absoluteLine(cursor, outputLineStarts) < topLineOfScreen) {
+            topLineOfScreen--;
+          }
+          if (outputLineStarts[topLineOfScreen+onscreenLineCount] < 0) {
+            topLineOfScreen--;
+          }
+          printSection(str, outputLineStarts[topLineOfScreen], outputLineStarts[topLineOfScreen+onscreenLineCount]-1);
+          unwrapText(str);
+          backspaceChar(str, cursor);
+        }
+      }
+    }
+  }
 }
 
 void setup() {
@@ -858,42 +1074,22 @@ void setup() {
     Serial.println("SD card initialization failed");
     while (true);
   }
-
-  Serial.println(F("\n--- SDLookingGlass v1.0 ---"));
-  Serial.println(F("Type 'help' for commands"));
-  printPrompt();
 }
 
 void loop() {
-  if (Serial.available() > 0) {
-    char c = Serial.read();
-    if (c == '\r' || c == '\n') { //Enter
-      if (inputLen > 0) {
-        inputBuffer[inputLen] = '\0';
-        Serial.println();
-        executeCommand(inputBuffer);
-        inputLen = 0;
-        memset(inputBuffer, 0, INPUT_LEN);
-        printPrompt();
-      } else {
-        
-        Serial.println();
-        printPrompt();
-      }
-    }
-    else if (c == 8 || c == 127) { //Backspace
-      if (inputLen > 0) {
-        inputLen--;
-        inputBuffer[inputLen] = '\0';
-        Serial.print(F("\b \b"));
-      }
-    }
-    else if (inputLen < INPUT_LEN-1) {
-      Serial.print(c);
-      inputBuffer[inputLen] = c;
-      inputLen++;
-    }
-  }
+  strcpy(outputBuffer, "\nroot@lookingglass:");
+  strcat(outputBuffer, currentPath);
+  strcat(outputBuffer, "# ");
+  strcat(prevPrompt, outputBuffer);
+  //Serial.print("prevPrompt: ");
+  //Serial.println(prevPrompt);
+  //Serial.print("inputBuffer: ");
+  //Serial.println(inputBuffer);
+  terminalKeyboardEdit(prevPrompt, inputBuffer);
+  strcpy(prevPrompt, outputBuffer);
+  strcat(prevPrompt, inputBuffer);
+  executeCommand(inputBuffer);
+  inputBuffer[0] = '\0';
 }
 
 void runScript(const char* content);
@@ -1267,7 +1463,7 @@ void executeCommand(char* line) {
       myFile.close();
       fileBuffer[i] = '\0';
       keyboardEdit(fileBuffer, newfilepath);
-      wrapText(fileBuffer);
+      wrapText(fileBuffer, lineStarts);
       printSection(fileBuffer, lineStarts[0], lineStarts[0+onscreenLineCount]-1);
       unwrapText(fileBuffer);
       display.clearDisplay();
