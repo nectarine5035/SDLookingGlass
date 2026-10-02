@@ -64,11 +64,11 @@ int topLineOfScreen = 0;
 int onscreenLineCount;
 int saveState = 1;
 
-#define OUTPUT_LEN 256
-char outputBuffer[OUTPUT_LEN];
-const int outputLinesEstimation = floor(MAX_LEN/3);
+#define OUTPUT_LEN 720
+char outputBuffer[OUTPUT_LEN] = "--- SDLookingGlass v1.0 ---\nType 'help' for commands\n";
+char promptBuffer[OUTPUT_LEN + 25 + PATH_LEN];
+const int outputLinesEstimation = floor(OUTPUT_LEN/3);
 int outputLineStarts[outputLinesEstimation];
-char prevPrompt[2*(20 + PATH_LEN + INPUT_LEN) + OUTPUT_LEN] = "--- SDLookingGlass v1.0 ---\nType 'help' for commands\n";
 
 float freeMemory() {
   Sd2Card card;
@@ -101,12 +101,6 @@ void addDmesg(const __FlashStringHelper* msg) {
   strncpy_P(dmesg[dmesgIndex].message, (PGM_P)msg, DMESG_LEN - 1);
   dmesg[dmesgIndex].message[DMESG_LEN - 1] = '\0';
   dmesgIndex++;
-}
-
-void printPrompt() {
-  Serial.print(F("root@lookingglass:"));
-  Serial.print(currentPath);
-  Serial.print(F("# "));
 }
 
 void toLowercase(char* str) {
@@ -152,7 +146,7 @@ float decimalCharToFloat(char* str) {
         beforeDec++;
       }
     } else {
-      Serial.println(F("Invalid number"));
+      strcat(outputBuffer, "Invalid number\n");
       return 0;
     }
   }
@@ -360,10 +354,10 @@ void dollarSignDoublePar(char* str) { //Replaces expression in $(( )) with the s
         }
         str[j] = '\0';
       } else {
-        Serial.println("Invalid expression");
+        strcat(outputBuffer, "Invalid expression\n");
       }
     } else {
-      Serial.println(F("Error: expected '))'"));
+      strcat(outputBuffer, "Error: expected '))'\n");
       return;
     }
   }
@@ -381,14 +375,20 @@ void wrapText(char* str, int* globalLineStarts) {
       prevSpace = i;
     }
     if (count >= COLS && count - prevSpace < COLS && prevSpace != 0) {
-      str[prevSpace] = 0x0D; //A special character is used for newlines in wrapText, so that newlines typed in the text by the user can be preserved
-      globalLineStarts[lineCount] = prevSpace + 1;
-      lineCount++;
-      i = prevSpace;
-      count = -1;
+      if (str[prevSpace] == 0x0D) {
+        globalLineStarts[lineCount] = i;
+        lineCount++;
+        count = -1;
+      } else {
+        str[prevSpace] = 0x0D; //A special character is used for newlines in wrapText, so that newlines typed in the text by the user can be preserved
+        globalLineStarts[lineCount] = prevSpace + 1;
+        lineCount++;
+        i = prevSpace;
+        count = -1;
+      }
     }
     if (str[i] == '\n') {
-      globalLineStarts[lineCount] = i + 1;
+      globalLineStarts[lineCount] = i;
       lineCount++;
       count = -1;
     }
@@ -614,7 +614,7 @@ void keyboardEdit(char* str, char* saveFilePath) {
         }
       } else if (ps2 == 0x0964) { //Alt+F4
         if (saveState == 0) {
-          Serial.println("unsaved");
+          //Serial.println("unsaved");
         }
         persistentCursor = cursor;
         return;
@@ -765,6 +765,10 @@ char codesToAscii(uint16_t in) {
     return '+';
   } else if (in == 0x5C) {
     return 0x5C;
+  } else if (in == 0x403B) {
+    return '<';
+  } else if (in == 0x403D) {
+    return '>';
   }
 
   if (!(out > 31 && out < 128)) { //Except for cases above, only returns alphanumeric characters
@@ -893,7 +897,13 @@ void terminalKeyboardEdit(char* strIn, char* strOut) {
           cursor++;
           highlighting = 0;
         } else {
-          if (currentLen+1 <= MAX_LEN-1) {
+          //Serial.print("cursor: ");
+          //Serial.println(cursor);
+          //Serial.print("currentLen: ");
+          //Serial.println(currentLen);
+          //Serial.print("staticLen: ");
+          //Serial.println(staticLen);
+          if (currentLen+1-staticLen < INPUT_LEN) {
             insInString(str, c, cursor);
             currentLen++;
             cursor++;
@@ -986,7 +996,7 @@ void terminalKeyboardEdit(char* strIn, char* strOut) {
           highlighting = 0;
         }
 
-        if (currentLen+clipboardLen <= MAX_LEN-1) {
+        if (currentLen+clipboardLen-staticLen < INPUT_LEN) { 
           for (int i = 0; i < clipboardLen; i++) {
             insInString(str, clipboard[i], cursor);
             currentLen++;
@@ -1010,7 +1020,7 @@ void terminalKeyboardEdit(char* strIn, char* strOut) {
 
       if (printing) {
         if (topLineOfScreen + onscreenLineCount + -1 > absoluteLine(currentLen, outputLineStarts)) {
-          while (topLineOfScreen + onscreenLineCount + -1 > absoluteLine(currentLen, outputLineStarts)) {
+          while (topLineOfScreen + onscreenLineCount + -1 > absoluteLine(currentLen, outputLineStarts) && topLineOfScreen > 0) {
             topLineOfScreen--;
           }
         }
@@ -1077,17 +1087,18 @@ void setup() {
 }
 
 void loop() {
-  strcpy(outputBuffer, "\nroot@lookingglass:");
-  strcat(outputBuffer, currentPath);
-  strcat(outputBuffer, "# ");
-  strcat(prevPrompt, outputBuffer);
-  //Serial.print("prevPrompt: ");
-  //Serial.println(prevPrompt);
+  strcpy(promptBuffer, "\nroot@lookingglass:");
+  strcat(promptBuffer, currentPath);
+  strcat(promptBuffer, "# ");
+  strcat(outputBuffer, promptBuffer);
+  //Serial.print("outputBuffer: ");
+  //Serial.println(outputBuffer);
   //Serial.print("inputBuffer: ");
   //Serial.println(inputBuffer);
-  terminalKeyboardEdit(prevPrompt, inputBuffer);
-  strcpy(prevPrompt, outputBuffer);
-  strcat(prevPrompt, inputBuffer);
+  terminalKeyboardEdit(outputBuffer, inputBuffer);
+  strcpy(outputBuffer, promptBuffer);
+  strcat(outputBuffer, inputBuffer);
+  strcat(outputBuffer, "\n");
   executeCommand(inputBuffer);
   inputBuffer[0] = '\0';
 }
@@ -1122,22 +1133,22 @@ void executeCommand(char* line) {
       File lsEntry =  lsDir.openNextFile();
       if (! lsEntry) {
         // no more files
-        Serial.println(" ");
+        strcat(outputBuffer, "\n");
         break;
       }
       empty = 0;
 
-      Serial.print(lsEntry.name());
+      strcat(outputBuffer, lsEntry.name());
 
       if (lsEntry.isDirectory()) {
-        Serial.print("/   ");
+        strcat(outputBuffer, "/   ");
       } else {
-        Serial.print("   ");
+        strcat(outputBuffer, "   ");
       }
       lsEntry.close();
     }
 
-    if (empty) Serial.println(F("(empty)"));
+    if (empty) strcat(outputBuffer, "(empty)");
     lsDir.close();
   }
   else if (strcmp_P(cmd, PSTR("mkdir")) == 0) {
@@ -1175,7 +1186,7 @@ void executeCommand(char* line) {
         File entry =  dir.openNextFile();
         if (! entry) {
           // no more files
-          Serial.println("");
+          //Serial.println("");
           break;
         }
 
@@ -1189,16 +1200,16 @@ void executeCommand(char* line) {
         if (!safeConcatPath(currentPath, args)) {
           strcpy(currentPath, "/");
           currentPath[PATH_LEN - 1] = '\0';
-          Serial.println(F("Path too long."));
+          strcat(outputBuffer, "Path too long.");
           return;
         }
       } else {
-        Serial.println(F("No dir."));
+        strcat(outputBuffer, "No dir.");
       }
     }
   }
   else if (strcmp_P(cmd, PSTR("pwd")) == 0) {
-    Serial.println(currentPath);
+    strcat(outputBuffer, currentPath);
   }
   else if (strcmp_P(cmd, PSTR("echo")) == 0) {
     variableSubstitute(args);
@@ -1221,37 +1232,52 @@ void executeCommand(char* line) {
       if (dataFile) {
         dataFile.println(text);
         dataFile.close();
-        Serial.println(text);
+        strcat(outputBuffer, text);
       } else {
-        Serial.println(F("error opening file"));
+        strcat(outputBuffer, "error opening file");
       }
     } else {
-      Serial.println(args);
+      strcat(outputBuffer, args);
     }
   }
   else if (strcmp_P(cmd, PSTR("cat")) == 0) {
+    char str[OUTPUT_LEN - (26 + NAME_LEN + PATH_LEN)];
     char newfilepath[PATH_LEN] = "";
     strcpy(newfilepath, currentPath);
     strcat(newfilepath, args);
 
     File myFile = SD.open(newfilepath);
+
     if (myFile) {
-      while (myFile.available()) {
-        Serial.write(myFile.read());
+      int i = 0;
+      while (myFile.available() && i < MAX_LEN) {
+        str[i] = myFile.read();
+        if (i > OUTPUT_LEN - (26 + NAME_LEN + PATH_LEN)) {
+          break;
+        }
+        i++;
       }
+      str[i] = '\0';
+      strcat(outputBuffer, str);
       myFile.close();
     } else {
-      Serial.println("error opening file");
+      strcat(outputBuffer, "error opening file");
     }
   }
   else if (strcmp_P(cmd, PSTR("info")) == 0) {
+    char str[10];
     File myFile = SD.open(args);
     if (myFile) {
-      Serial.print(F("Name: ")); Serial.println(myFile.name());
-      Serial.print(F("Type: ")); Serial.println(myFile.isDirectory() ? F("Directory") : F("File"));
-      Serial.print(F("Size: ")); Serial.print(myFile.size()); Serial.println(F(" bytes"));
+      strcat(outputBuffer, "Name: ");
+      strcat(outputBuffer, myFile.name());
+      strcat(outputBuffer, "\nType: ");
+      strcat(outputBuffer, (myFile.isDirectory() ? "Directory" : "File"));
+      strcat(outputBuffer, "\nSize: ");
+      sprintf(str, "%d", myFile.size());
+      strcat(outputBuffer, str);
+      strcat(outputBuffer, " bytes");
     } else {
-      Serial.println(F("Not found."));
+      strcat(outputBuffer, "Not found.");
     }
     myFile.close();
   }
@@ -1267,20 +1293,23 @@ void executeCommand(char* line) {
     if (SD.exists(filePath)) {
       SD.remove(filePath);
       SD.rmdir(filePath);
-      Serial.println(F("Removed."));
+      strcat(outputBuffer, "Removed.");
     } else {
-      Serial.println(F("Not found."));
+      strcat(outputBuffer, "Not found.");
     }
   }
   else if (strcmp_P(cmd, PSTR("dmesg")) == 0) {
-    Serial.println(F("=== KERNEL MESSAGES ==="));
+    strcat(outputBuffer, "=== KERNEL MESSAGES ===\n");
+    char str[10];
     int j;
     for (j = 0; j < DMESG_LINES; j++) {
       if (dmesg[j].message[0] != '\0') {
-        Serial.print(F("["));
-        Serial.print(dmesg[j].timestamp);
-        Serial.print(F("] "));
-        Serial.println(dmesg[j].message);
+        strcat(outputBuffer, "[");
+        sprintf(str, "%d", dmesg[j].timestamp);
+        strcat(outputBuffer, str);
+        strcat(outputBuffer, "] ");
+        strcat(outputBuffer, dmesg[j].message);
+        strcat(outputBuffer, "\n");
       }
     }
   }
@@ -1289,43 +1318,54 @@ void executeCommand(char* line) {
     unsigned long h = s / 3600;
     unsigned long m = (s % 3600) / 60;
     unsigned long sec = s % 60;
-    Serial.print(F("up "));
-    Serial.print(h); Serial.print(F("h "));
-    Serial.print(m); Serial.print(F("m "));
-    Serial.print(sec); Serial.println(F("s"));
+
+    char str[10];
+    strcat(outputBuffer, "up ");
+    sprintf(str, "%d", h);
+    strcat(outputBuffer, str);
+    strcat(outputBuffer, "h ");
+    sprintf(str, "%d", m);
+    strcat(outputBuffer, str);
+    strcat(outputBuffer, "m ");
+    sprintf(str, "%d", sec);
+    strcat(outputBuffer, str);
+    strcat(outputBuffer, "s");
     addDmesg(F("uptime command"));
   }
   else if (strcmp_P(cmd, PSTR("df")) == 0 || strcmp_P(cmd, PSTR("free")) == 0) {
-    Serial.print(F("Free Disk Space: "));
-    Serial.print(freeMemory());
-    Serial.println(F(" GB"));
+    char str[10];
+    sprintf(str, "%f", freeMemory());
+    strcat(outputBuffer, "Free Disk Space: ");
+    strcat(outputBuffer, str);
+    strcat(outputBuffer, " GB");
   }
   else if (strcmp_P(cmd, PSTR("whoami")) == 0) {
-    Serial.println(F("root"));
+    strcat(outputBuffer, "root");
   }
   else if (strcmp_P(cmd, PSTR("uname")) == 0) {
-    Serial.println(F("SDLookingGlass v1.0"));
-    Serial.print(F("Kernel: Arduino "));
-    Serial.println(F("AVR"));
-    Serial.print(F("Hardware: "));
-    Serial.println(F("Teensy 4.1"));
-    Serial.print(F("Disk Space: "));
-    Serial.print(freeMemory());
-    Serial.println(F(" GB free"));
+    char str[10];
+    sprintf(str, "%f", freeMemory());
+    strcat(outputBuffer, "SDLookingGlass v1.0\n"
+    "Kernel: Arduino "
+    "AVR\n"
+    "Hardware: Teensy 4.1\n"
+    "Disk Space: ");
+    strcat(outputBuffer, str);
+    strcat(outputBuffer, " GB free\n");
   }
   else if (strcmp_P(cmd, PSTR("reboot")) == 0) {
-    Serial.println(F("Rebooting..."));
+    printSection("Rebooting...", 0, 12);
     addDmesg(F("System reboot"));
     delay(500);
     resetFunc();
   }
   else if (strcmp_P(cmd, PSTR("clear")) == 0) {
-    int j;
-    for (j = 0; j < 30; j++) Serial.println();
+    inputBuffer[0] = '\0';
+    outputBuffer[0] = '\0';
   }
   else if (strcmp_P(cmd, PSTR("sh")) == 0) {
     if (args[0] == '\0') {
-      Serial.println(F("Usage: sh [script]"));
+      strcat(outputBuffer, "Usage: sh [script]");
       return;
     }
 
@@ -1343,7 +1383,7 @@ void executeCommand(char* line) {
       script[INPUT_LEN-1] = '\0';
       runScript(script);
     } else {
-      Serial.println(F("Script not found."));
+      strcat(outputBuffer, "Script not found.");
     }
   }
   else if (strcmp_P(cmd, PSTR("alias")) == 0) {
@@ -1351,14 +1391,18 @@ void executeCommand(char* line) {
       int j, any = 0;
       for (j = 0; j < MAX_ALIASES; j++) {
         if (aliases[j].active) {
-          Serial.print(aliases[j].name);
-          Serial.print(F("='"));
-          Serial.print(aliases[j].value);
-          Serial.println(F("'"));
+          //Serial.print(aliases[j].name);
+          //Serial.print(F("='"));
+          //Serial.print(aliases[j].value);
+          //Serial.println(F("'"));
+          strcat(outputBuffer, aliases[j].name);
+          strcat(outputBuffer, "='");
+          strcat(outputBuffer, aliases[j].value);
+          strcat(outputBuffer, "'");
           any = 1;
         }
       }
-      if (!any) Serial.println(F("No aliases."));
+      if (!any) strcat(outputBuffer, "No aliases.");
     } else {
       int eq = indexOf(args, "=");
       if (eq == -1) {
@@ -1366,11 +1410,15 @@ void executeCommand(char* line) {
         int j, found = 0;
         for (j = 0; j < MAX_ALIASES; j++) {
           if (aliases[j].active && strcmp(aliases[j].name, args) == 0) {
-            Serial.print(args); Serial.print(F("='")); Serial.print(aliases[j].value); Serial.println(F("'"));
+            //Serial.print(args); Serial.print(F("='")); Serial.print(aliases[j].value); Serial.println(F("'"));
+            strcat(outputBuffer, args);
+            strcat(outputBuffer, "='");
+            strcat(outputBuffer, aliases[j].value);
+            strcat(outputBuffer, "'");
             found = 1; break;
           }
         }
-        if (!found) Serial.println(F("No such alias."));
+        if (!found) strcat(outputBuffer, "No such alias.");
       } else {
         char aname[ALIAS_NAME_LEN] = "";
         char aval[ALIAS_VAL_LEN] = "";
@@ -1387,42 +1435,40 @@ void executeCommand(char* line) {
             if (!aliases[j].active) { slot = j; break; }
           }
         }
-        if (slot == -1) { Serial.println(F("Alias table full.")); return; }
+        if (slot == -1) { strcat(outputBuffer, "Alias table full."); return; }
         strncpy(aliases[slot].name, aname, ALIAS_NAME_LEN);
         aliases[slot].name[ALIAS_NAME_LEN - 1] = '\0';
         strncpy(aliases[slot].value, aval, ALIAS_VAL_LEN);
         aliases[slot].value[ALIAS_VAL_LEN - 1] = '\0';
         aliases[slot].active = 1;
-        Serial.println(F("Alias set."));
+        strcat(outputBuffer, "Alias set.");
       }
     }
   }
   else if (strcmp_P(cmd, PSTR("help")) == 0) {
-    Serial.println(F(" "));
-    Serial.println(F("ls - List files"));
-    Serial.println(F("cd - Change directory"));
-    Serial.println(F("pwd - Print working directory"));
-    Serial.println(F("mkdir - Make directory"));
-    Serial.println(F("touch - Create file"));
-    Serial.println(F("cat - Read file text"));
-    Serial.println(F("echo - Echo text to terminal"));
-    Serial.println(F("echo [text] > [file]  -- Add text to file"));
-    Serial.println(F("rm - Remove file or directory"));
-    Serial.println(F("info - File info"));
-    Serial.println(F("sh - Run shell script"));
-    Serial.println(F("sh [file]  -- run script (use ; as line separator)"));
-    Serial.println(F("uptime - Show uptime"));
-    Serial.println(F("uname - Show device info"));
-    Serial.println(F("dmesg - Show kernel messages"));
-    Serial.println(F("df, free - Show free disk space"));
-    Serial.println(F("whoami - Show username"));
-    Serial.println(F("clear - Clear terminal"));
-    Serial.println(F("reboot - Reboot device"));
-    Serial.println(F("alias - Create command alias"));
-    Serial.println(F("$(([expression]))  -- Solve a math expression"));
-    Serial.println(F("[variable]=[number]  -- Set a variable"));
-    Serial.println(F("unset - Unset a variable"));
-    Serial.println(F(" "));
+    strcat(outputBuffer, "ls - List files\n"
+    "cd - Change directory\n"
+    "pwd - Print working directory\n"
+    "mkdir - Make directory\n"
+    "touch - Create file\n"
+    "cat - Read file text\n"
+    "echo - Echo text to terminal\n"
+    "echo [text] > [file]  -- Add text to file\n"
+    "rm - Remove file or directory\n"
+    "info - File info\n"
+    "sh - Run shell script\n"
+    "sh [file]  -- run script (use ; as line separator)\n"
+    "uptime - Show uptime\n"
+    "uname - Show device info\n"
+    "dmesg - Show kernel messages\n"
+    "df, free - Show free disk space\n"
+    "whoami - Show username\n"
+    "clear - Clear terminal\n"
+    "reboot - Reboot device\n"
+    "alias - Create command alias\n"
+    "$(([expression]))  -- Solve a math expression\n"
+    "[variable]=[number]  -- Set a variable\n"
+    "unset - Unset a variable");
   }
   else if (strcmp_P(cmd, PSTR("unset")) == 0) {
     int found = 0;
@@ -1439,7 +1485,7 @@ void executeCommand(char* line) {
     if (found) {
       varIndex--;
     } else {
-      Serial.println(F("Variable not found"));
+      strcat(outputBuffer, "Variable not found");
     }
   }
   else if (strcmp_P(cmd, PSTR("notepad")) == 0) {
@@ -1469,7 +1515,7 @@ void executeCommand(char* line) {
       display.clearDisplay();
       display.display();
     } else {
-      Serial.println("error opening file");
+      strcat(outputBuffer, "error opening file");
     }
   } else {
     int j, resolved = 0; //Check alias
@@ -1519,7 +1565,7 @@ void executeCommand(char* line) {
           vars[varIndex].value = varTotal;
           varIndex++;
         } else {
-          Serial.println(F("No space available for variables"));
+          strcat(outputBuffer, "No space available for variables");
         }
       }
 
@@ -1530,7 +1576,7 @@ void executeCommand(char* line) {
         Serial.println(vars[i].value);
       }*/
     }
-    if (!resolved) Serial.println(F("Unknown command."));
+    if (!resolved) strcat(outputBuffer, "Unknown command.");
   }
 }
 
@@ -1539,6 +1585,7 @@ void runScript(const char* content) {
   char line[INPUT_LEN];
   int ci = 0, li = 0, lineNum = 0;
   int len = strlen(content);
+  char num[10];
 
   while (ci <= len) {
     char c = (ci < len) ? content[ci] : ';';
@@ -1547,9 +1594,14 @@ void runScript(const char* content) {
       if (li > 0) {
         line[li] = '\0';
         lineNum++;
-        Serial.print(F("[sh:")); Serial.print(lineNum); Serial.print(F("] "));
-        Serial.println(line);
+        strcat(outputBuffer, "[sh:");
+        sprintf(num, "%d", lineNum);
+        strcat(outputBuffer, num);
+        strcat(outputBuffer, "] ");
+        strcat(outputBuffer, line);
+        strcat(outputBuffer, "\n");
         executeCommand(line);
+        strcat(outputBuffer, "\n");
         li = 0;
       }
     } else {
@@ -1557,5 +1609,5 @@ void runScript(const char* content) {
     }
   }
   addDmesg(F("sh: script done"));
-  Serial.println(F("[sh] done."));
+  strcat(outputBuffer, "[sh] done.");
 }
