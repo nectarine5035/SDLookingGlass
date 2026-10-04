@@ -8,9 +8,9 @@ const int chipSelect = BUILTIN_SDCARD;
 char inputBuffer[INPUT_LEN] = "";
 int inputLen = 0;
 
-#define NAME_LEN 12
+#define NAME_LEN 24
 
-#define PATH_LEN 16
+#define PATH_LEN 64
 char currentPath[PATH_LEN] = "/";
 
 #define DMESG_LINES 6
@@ -53,8 +53,8 @@ Adafruit_SH1106G display = Adafruit_SH1106G(128, 64,OLED_MOSI, OLED_CLK, OLED_DC
 #define DataPin 13
 #define IRQpin 14
 PS2KeyAdvanced keyboard;
-#define MAX_LEN 550 //There are usually around 400,000 bytes free in RAM1 for this but don't push it
-char fileBuffer[MAX_LEN] = "Alfred Nobel invented Dynamite; he made a fortune manufacturing and selling deadly weapons, canons and armaments. In 1888, his brother Ludvig died, but many newspapers mistakenly thought that he had died and published obituaries for Alfred Nobel, they weren't very flattering, one French paper declared the \"merchant of death is dead.\" Nobel read these obituaries and was so ashamed by what his legacy apparently was going to be. When he did die, he left almost all of his money to the cause of celebrating humanity, he created the Nobel Prize.";
+#define MAX_LEN 100000 //There are usually around 100,000 bytes free in RAM1 for this but don't push it
+char fileBuffer[MAX_LEN];
 const int linesEstimation = floor(MAX_LEN/3);
 int lineStarts[linesEstimation];
 int persistentCursor = 0;
@@ -586,7 +586,7 @@ void keyboardEdit(char* str, char* saveFilePath) {
           SD.remove(saveFilePath);
           File myFile = SD.open(saveFilePath, FILE_WRITE);
           if (myFile) {
-            myFile.println(str);
+            myFile.print(str);
             myFile.close();
           } else {
             Serial.println("error opening file");
@@ -1081,13 +1081,13 @@ void setup() {
   keyboard.begin(DataPin, IRQpin);
 
   if (!SD.begin(chipSelect)) {
-    Serial.println("SD card initialization failed");
+    printSection("SD card\ninitialization failed", 0, 29);
     while (true);
   }
 }
 
 void loop() {
-  strcpy(promptBuffer, "\nroot@lookingglass:");
+  strcpy(promptBuffer, "root@lookingglass:");
   strcat(promptBuffer, currentPath);
   strcat(promptBuffer, "# ");
   strcat(outputBuffer, promptBuffer);
@@ -1148,7 +1148,7 @@ void executeCommand(char* line) {
       lsEntry.close();
     }
 
-    if (empty) strcat(outputBuffer, "(empty)");
+    if (empty) strcat(outputBuffer, "(empty)\n");
     lsDir.close();
   }
   else if (strcmp_P(cmd, PSTR("mkdir")) == 0) {
@@ -1210,6 +1210,7 @@ void executeCommand(char* line) {
   }
   else if (strcmp_P(cmd, PSTR("pwd")) == 0) {
     strcat(outputBuffer, currentPath);
+    strcat(outputBuffer, "\n");
   }
   else if (strcmp_P(cmd, PSTR("echo")) == 0) {
     variableSubstitute(args);
@@ -1239,6 +1240,7 @@ void executeCommand(char* line) {
     } else {
       strcat(outputBuffer, args);
     }
+    strcat(outputBuffer, "\n");
   }
   else if (strcmp_P(cmd, PSTR("cat")) == 0) {
     char str[OUTPUT_LEN - (26 + NAME_LEN + PATH_LEN)];
@@ -1263,10 +1265,15 @@ void executeCommand(char* line) {
     } else {
       strcat(outputBuffer, "error opening file");
     }
+    strcat(outputBuffer, "\n");
   }
   else if (strcmp_P(cmd, PSTR("info")) == 0) {
+    char newfilepath[PATH_LEN] = "";
+    strcpy(newfilepath, currentPath);
+    strcat(newfilepath, args);
+
     char str[10];
-    File myFile = SD.open(args);
+    File myFile = SD.open(newfilepath);
     if (myFile) {
       strcat(outputBuffer, "Name: ");
       strcat(outputBuffer, myFile.name());
@@ -1275,9 +1282,9 @@ void executeCommand(char* line) {
       strcat(outputBuffer, "\nSize: ");
       sprintf(str, "%d", myFile.size());
       strcat(outputBuffer, str);
-      strcat(outputBuffer, " bytes");
+      strcat(outputBuffer, " bytes\n");
     } else {
-      strcat(outputBuffer, "Not found.");
+      strcat(outputBuffer, "Not found.\n");
     }
     myFile.close();
   }
@@ -1293,9 +1300,9 @@ void executeCommand(char* line) {
     if (SD.exists(filePath)) {
       SD.remove(filePath);
       SD.rmdir(filePath);
-      strcat(outputBuffer, "Removed.");
+      strcat(outputBuffer, "Removed\n");
     } else {
-      strcat(outputBuffer, "Not found.");
+      strcat(outputBuffer, "Not found\n");
     }
   }
   else if (strcmp_P(cmd, PSTR("dmesg")) == 0) {
@@ -1329,7 +1336,7 @@ void executeCommand(char* line) {
     strcat(outputBuffer, "m ");
     sprintf(str, "%d", sec);
     strcat(outputBuffer, str);
-    strcat(outputBuffer, "s");
+    strcat(outputBuffer, "s\n");
     addDmesg(F("uptime command"));
   }
   else if (strcmp_P(cmd, PSTR("df")) == 0 || strcmp_P(cmd, PSTR("free")) == 0) {
@@ -1337,10 +1344,10 @@ void executeCommand(char* line) {
     sprintf(str, "%f", freeMemory());
     strcat(outputBuffer, "Free Disk Space: ");
     strcat(outputBuffer, str);
-    strcat(outputBuffer, " GB");
+    strcat(outputBuffer, " GB\n");
   }
   else if (strcmp_P(cmd, PSTR("whoami")) == 0) {
-    strcat(outputBuffer, "root");
+    strcat(outputBuffer, "root\n");
   }
   else if (strcmp_P(cmd, PSTR("uname")) == 0) {
     char str[10];
@@ -1385,6 +1392,7 @@ void executeCommand(char* line) {
     } else {
       strcat(outputBuffer, "Script not found.");
     }
+    strcat(outputBuffer, "\n");
   }
   else if (strcmp_P(cmd, PSTR("alias")) == 0) {
     if (args[0] == '\0') {
@@ -1444,6 +1452,7 @@ void executeCommand(char* line) {
         strcat(outputBuffer, "Alias set.");
       }
     }
+    strcat(outputBuffer, "\n");
   }
   else if (strcmp_P(cmd, PSTR("help")) == 0) {
     strcat(outputBuffer, "ls - List files\n"
@@ -1468,7 +1477,7 @@ void executeCommand(char* line) {
     "alias - Create command alias\n"
     "$(([expression]))  -- Solve a math expression\n"
     "[variable]=[number]  -- Set a variable\n"
-    "unset - Unset a variable");
+    "unset - Unset a variable\n");
   }
   else if (strcmp_P(cmd, PSTR("unset")) == 0) {
     int found = 0;
@@ -1485,7 +1494,7 @@ void executeCommand(char* line) {
     if (found) {
       varIndex--;
     } else {
-      strcat(outputBuffer, "Variable not found");
+      strcat(outputBuffer, "Variable not found\n");
     }
   }
   else if (strcmp_P(cmd, PSTR("notepad")) == 0) {
