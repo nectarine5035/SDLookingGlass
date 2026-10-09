@@ -65,7 +65,7 @@ int onscreenLineCount;
 int saveState = 1;
 
 #define OUTPUT_LEN 720
-char outputBuffer[OUTPUT_LEN] = "--- SDLookingGlass v1.0 ---\nType 'help' for commands\n";
+char outputBuffer[OUTPUT_LEN] = "SDLookingGlass v1.0\nType 'help' for commands\n";
 char promptBuffer[OUTPUT_LEN + 25 + PATH_LEN];
 const int outputLinesEstimation = floor(OUTPUT_LEN/3);
 int outputLineStarts[outputLinesEstimation];
@@ -371,10 +371,22 @@ void wrapText(char* str, int* globalLineStarts) {
   int i;
 
   for (i = 0; str[i] != '\0'; i++) {
+    //Serial.print(i);
+    //Serial.print(": ");
+    //Serial.print(str[i]);
+    //Serial.print("/");
+    //Serial.print(str[i], HEX);
+    //Serial.print(" [count=");
+    //Serial.print(count);
+    //Serial.print("] [prevSpace=");
+    //Serial.print(prevSpace);
+    //Serial.println("]");
+
     if (str[i] == ' ') {
       prevSpace = i;
     }
-    if (count >= COLS && count - prevSpace < COLS && prevSpace != 0) {
+    if (count >= COLS && prevSpace != 0) {
+      //Serial.println("This enters the if statement");
       if (str[prevSpace] == 0x0D) {
         globalLineStarts[lineCount] = i;
         lineCount++;
@@ -391,6 +403,7 @@ void wrapText(char* str, int* globalLineStarts) {
       globalLineStarts[lineCount] = i;
       lineCount++;
       count = -1;
+      prevSpace = 0;
     }
     count++;
   }
@@ -402,6 +415,9 @@ void wrapText(char* str, int* globalLineStarts) {
   } else {
     onscreenLineCount = ROWS;
   }
+  //Serial.println("");
+  //Serial.println("");
+  //Serial.println("");
 }
 
 void unwrapText(char* str) {
@@ -614,10 +630,34 @@ void keyboardEdit(char* str, char* saveFilePath) {
         }
       } else if (ps2 == 0x0964) { //Alt+F4
         if (saveState == 0) {
-          //Serial.println("unsaved");
+          printSection("Exit without saving?\n[S] - Save + exit\n[X] - Exit\n[R] - Return", 0, 62);
+          delay(1000);
+          while (true) {
+            if (keyboard.available()) {
+
+              ps2 = keyboard.read();
+              c = codesToAscii(ps2);
+            
+              if (c == 's') {
+                SD.remove(saveFilePath);
+                File myFile = SD.open(saveFilePath, FILE_WRITE);
+                if (myFile) {
+                  myFile.print(str);
+                  myFile.close();
+                } else {
+                  Serial.println("error opening file");
+                }
+                persistentCursor = cursor;
+                return;
+              } else if (c == 'x') {
+                persistentCursor = cursor;
+                return;
+              } else if (c == 'r') {
+                break;
+              }
+            }
+          }
         }
-        persistentCursor = cursor;
-        return;
       } else {
         printing = 0;
       }
@@ -1387,7 +1427,7 @@ void executeCommand(char* line) {
         j++;
       }
       myFile.close();
-      script[INPUT_LEN-1] = '\0';
+      script[j] = '\0';
       runScript(script);
     } else {
       strcat(outputBuffer, "Script not found.");
@@ -1585,7 +1625,7 @@ void executeCommand(char* line) {
         Serial.println(vars[i].value);
       }*/
     }
-    if (!resolved) strcat(outputBuffer, "Unknown command.");
+    if (!resolved) strcat(outputBuffer, "\nUnknown command.");
   }
 }
 
@@ -1595,6 +1635,9 @@ void runScript(const char* content) {
   int ci = 0, li = 0, lineNum = 0;
   int len = strlen(content);
   char num[10];
+
+  Serial.print("content: ");
+  Serial.println(content);
 
   while (ci <= len) {
     char c = (ci < len) ? content[ci] : ';';
