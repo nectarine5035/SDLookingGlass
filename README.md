@@ -28,6 +28,7 @@ A fork of [my previous fork](https://github.com/nectarine5035/KernelUNOwithSD) o
 - `$(([expression]))`  -- Solve a math expression
 - `[variable]=[number]`  -- Set a variable
 - `unset` - Unset a variable
+- `variables` - List values of all variables
 
 ## License
 
