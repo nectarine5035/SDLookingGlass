@@ -136,7 +136,11 @@ float decimalCharToFloat(char* str) {
   int afterDec = 0;
   int pos = 0;
   float total = 0;
-  for (int i = 0; str[i] != '\0'; i++) {
+  int negativeSign = 0;
+  if (str[0] == '-') {
+    negativeSign = 1;
+  }
+  for (int i = negativeSign; str[i] != '\0'; i++) {
     if (str[i] == '.') {
       pos = 1;
     } else if ((str[i] - '0') >= 0 && (str[i] - '0') <= 9) {
@@ -145,16 +149,22 @@ float decimalCharToFloat(char* str) {
       } else {
         beforeDec++;
       }
+    } else if (str[i] == '-' && negativeSign) {
+
     } else {
       strcat(outputBuffer, "Invalid number\n");
       return 0;
     }
   }
-  for (int i = 0; i < beforeDec; i++) {
+  beforeDec = beforeDec + negativeSign;
+  for (int i = negativeSign; i < beforeDec; i++) {
     total = total + (str[i] - '0')*pow(10, (beforeDec-i-1));
   }
   for (int i = 1; i <= afterDec; i++) {
     total = total + (str[beforeDec + i] - '0')*pow(10, -i);
+  }
+  if (negativeSign) {
+    total = -total;
   }
   return total;
 }
@@ -209,57 +219,158 @@ void variableSubstitute(char* str) { //Replaces variable name with the value of 
 void solveArithmetic(char* str) {
   char tempFloat[8];
   int termsIndex = 0;
-  float firstVal = 0;
-  float secondVal;
-  int nextOp = 0;
+  float result = 0;
+
+  float flTerms[16];
+  int flOps[16];
+  int flTermsIndex = 0;
+  int flOpsIndex = 0;
+  int startNumber = 1;
 
   for (int i = 0; str[i] != '\0'; i++) {
-    if (str[i] == '+' || str[i] == '-' || str[i] == '*' || str[i] == '/') {
+    if (str[i] == '-' && startNumber) {
+      tempFloat[termsIndex] = str[i];
+      termsIndex++;
+      startNumber = 0;
+    } else if (str[i] == '+' || str[i] == '-' || str[i] == '*' || str[i] == '/' || str[i] == '^') {
       tempFloat[termsIndex] = '\0';
       termsIndex = 0;
-      secondVal = decimalCharToFloat(tempFloat);
-      if (nextOp == 0) {
-        firstVal = firstVal + secondVal;
-      } else if (nextOp == 1) {
-        firstVal = firstVal - secondVal;
-      } else if (nextOp == 2) {
-        firstVal = firstVal * secondVal;
-      } else if (nextOp == 3) {
-        firstVal = firstVal / secondVal;
-      }
+      flTerms[flTermsIndex] = decimalCharToFloat(tempFloat);
+      flTermsIndex++;
 
       if (str[i] == '+') {
-        nextOp = 0;
+        flOps[flOpsIndex] = 1;
       } else if (str[i] == '-') {
-        nextOp = 1;
+        flOps[flOpsIndex] = 2;
       } else if (str[i] == '*') {
-        nextOp = 2;
+        flOps[flOpsIndex] = 3;
       } else if (str[i] == '/') {
-        nextOp = 3;
+        flOps[flOpsIndex] = 4;
+      } else if (str[i] == '^') {
+        flOps[flOpsIndex] = 5;
       }
+      flOpsIndex++;
+      startNumber = 1;
     } else {
       tempFloat[termsIndex] = str[i];
       termsIndex++;
+      startNumber = 0;
     }
   }
   tempFloat[termsIndex] = '\0';
-  secondVal = decimalCharToFloat(tempFloat);
-  if (nextOp == 0) {
-    firstVal = firstVal + secondVal;
-  } else if (nextOp == 1) {
-    firstVal = firstVal - secondVal;
-  } else if (nextOp == 2) {
-    firstVal = firstVal * secondVal;
-  } else if (nextOp == 3) {
-    firstVal = firstVal / secondVal;
+  flTerms[flTermsIndex] = decimalCharToFloat(tempFloat);
+
+  //flTermsIndex++;
+  //for (int q = 0; q < flTermsIndex; q++) {
+  //  Serial.print(flTerms[q]);
+  //  Serial.print(" ");
+  //  Serial.print(flOps[q]);
+  //  Serial.print(" ");
+  //}
+  //Serial.println(flTerms[flTermsIndex]);
+
+  for (int q = 0; q < flTermsIndex; q++) { //Exponents
+    if (flOps[q] == 5 || flOps[q] == 0) {
+      int offset = 0;
+      while (flOps[q+offset] == 5 || flOps[q+offset] == 0) {
+        if (flOps[q+offset] == 5) {
+          flTerms[q] = pow(flTerms[q], flTerms[q+offset+1]);
+          flOps[q+offset] = 0;
+        }
+        if (q+offset+1 == flTermsIndex) {
+          break;
+        }
+        offset++;
+      }
+      q = q + offset;
+    }
   }
 
-  if (fmod(firstVal, 1) == 0.00) {
-    int firstValInt = firstVal;
-    sprintf(str, "%d", firstValInt);
-  } else {
-    sprintf(str, "%f", firstVal);
+  for (int q = 0; q < flTermsIndex; q++) { //Multiplication
+    if (flOps[q] == 3 || flOps[q] == 0) {
+      int offset = 0;
+      while (flOps[q+offset] == 3 || flOps[q+offset] == 0) {
+        if (flOps[q+offset] == 3) {
+          flTerms[q] = flTerms[q] * flTerms[q+offset+1];
+          flOps[q+offset] = 0;
+        }
+        if (q+offset+1 == flTermsIndex) {
+          break;
+        }
+        offset++;
+      }
+      q = q + offset;
+    }
   }
+
+  for (int q = 0; q < flTermsIndex; q++) { //Division
+    if (flOps[q] == 4 || flOps[q] == 0) {
+      int offset = 0;
+      while (flOps[q+offset] == 4 || flOps[q+offset] == 0) {
+        if (flOps[q+offset] == 4) {
+          flTerms[q] = flTerms[q] / flTerms[q+offset+1];
+          flOps[q+offset] = 0;
+        }
+        if (q+offset+1 == flTermsIndex) {
+          break;
+        }
+        offset++;
+      }
+      q = q + offset;
+    }
+  }
+
+  for (int q = 0; q < flTermsIndex; q++) { //Addition
+    if (flOps[q] == 1 || flOps[q] == 0) {
+      int offset = 0;
+      while (flOps[q+offset] == 1 || flOps[q+offset] == 0) {
+        if (flOps[q+offset] == 1) {
+          flTerms[q] = flTerms[q] + flTerms[q+offset+1];
+          flOps[q+offset] = 0;
+        }
+        if (q+offset+1 == flTermsIndex) {
+          break;
+        }
+        offset++;
+      }
+      q = q + offset;
+    }
+  }
+
+  for (int q = 0; q < flTermsIndex; q++) { //Subtraction
+    if (flOps[q] == 2 || flOps[q] == 0) {
+      int offset = 0;
+      while (flOps[q+offset] == 2 || flOps[q+offset] == 0) {
+        if (flOps[q+offset] == 2) {
+          flTerms[q] = flTerms[q] - flTerms[q+offset+1];
+          flOps[q+offset] = 0;
+        }
+        if (q+offset+1 == flTermsIndex) {
+          break;
+        }
+        offset++;
+      }
+      q = q + offset;
+    }
+  }
+
+  //for (int q = 0; q < flTermsIndex; q++) {
+  //  Serial.print(flTerms[q]);
+  //  Serial.print(" ");
+  //  Serial.print(flOps[q]);
+  //  Serial.print(" ");
+  //}
+  //Serial.println(flTerms[flTermsIndex]);
+
+  result = flTerms[0];
+
+  if (fmod(result, 1) == 0.00) {
+    int resultInt = result;
+    sprintf(str, "%d", resultInt);
+  } else {
+    sprintf(str, "%f", result);
+  }
+  //Serial.println(str);
 }
 
 void solveParentheses(char* str) {
@@ -335,7 +446,10 @@ void dollarSignDoublePar(char* str) { //Replaces expression in $(( )) with the s
         solveParentheses(exp);
       }
       int alphanumeric = 1;
-      for (int i = 0; exp[i] != '\0'; i++) {
+      if ((exp[0] < '0' || exp[0] > '9') && exp[0] != '.' && exp[0] != '-') {
+        alphanumeric = 0;
+      }
+      for (int i = 1; exp[i] != '\0'; i++) {
         if ((exp[i] < '0' || exp[i] > '9') && exp[i] != '.') {
           alphanumeric = 0;
         }
@@ -1495,29 +1609,30 @@ void executeCommand(char* line) {
     strcat(outputBuffer, "\n");
   }
   else if (strcmp_P(cmd, PSTR("help")) == 0) {
-    strcat(outputBuffer, "ls - List files\n"
-    "cd - Change directory\n"
-    "pwd - Print working directory\n"
-    "mkdir - Make directory\n"
-    "touch - Create file\n"
-    "cat - Read file text\n"
-    "echo - Echo text to terminal\n"
-    "echo [text] > [file]  -- Add text to file\n"
-    "rm - Remove file or directory\n"
-    "info - File info\n"
-    "sh - Run shell script\n"
-    "sh [file]  -- run script (use ; as line separator)\n"
-    "uptime - Show uptime\n"
-    "uname - Show device info\n"
-    "dmesg - Show kernel messages\n"
-    "df, free - Show free disk space\n"
-    "whoami - Show username\n"
-    "clear - Clear terminal\n"
-    "reboot - Reboot device\n"
-    "alias - Create command alias\n"
-    "$(([expression]))  -- Solve a math expression\n"
-    "[variable]=[number]  -- Set a variable\n"
-    "unset - Unset a variable\n");
+    strcat(outputBuffer, "ls - List files\n\n"
+    "cd - Change directory\n\n"
+    "pwd - Print working directory\n\n"
+    "mkdir - Make directory\n\n"
+    "touch - Create file\n\n"
+    "cat - Read file text\n\n"
+    "echo - Echo text to terminal\n\n"
+    "echo [text] > [file]  -- Add text to file\n\n"
+    "rm - Remove file or directory\n\n"
+    "info - File info\n\n"
+    "sh - Run shell script\n\n"
+    "sh [file]  -- run script (use ; as line separator)\n\n"
+    "uptime - Show uptime\n\n"
+    "uname - Show device info\n\n"
+    "dmesg - Show kernel messages\n\n"
+    "df, free - Show free disk space\n\n"
+    "whoami - Show username\n\n"
+    "clear - Clear terminal\n\n"
+    "reboot - Reboot device\n\n"
+    "alias - Create command alias\n\n"
+    "$(([expression]))  -- Solve a math expression\n\n"
+    "[variable]=[number]  -- Set a variable\n\n"
+    "unset - Unset a variable\n\n"
+    "variables - List values of all variables\n");
   }
   else if (strcmp_P(cmd, PSTR("unset")) == 0) {
     int found = 0;
@@ -1565,6 +1680,19 @@ void executeCommand(char* line) {
       display.display();
     } else {
       strcat(outputBuffer, "error opening file");
+    }
+  }
+  else if (strcmp_P(cmd, PSTR("variables")) == 0) {
+    char str[10];
+    strcat(outputBuffer, "All current vars:\n");
+    for (int i = 0; i < varIndex; i++) {
+      strcat(outputBuffer, vars[i].name);
+      strcat(outputBuffer, ": ");
+      strcpy(str, vars[i].name);
+      variableSubstitute(str);
+      strcat(outputBuffer, str);
+      strcat(outputBuffer, "\n");
+      str[0] = '\0';
     }
   } else {
     int j, resolved = 0; //Check alias
