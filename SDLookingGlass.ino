@@ -110,14 +110,24 @@ void toLowercase(char* str) {
   }
 }
 
-int indexOf(const char* str, const char* substr) { //Find the point in a string where a substring is
+int indexOf(const char* str, const char* substr, int direction) { //Find the point in a string where a substring is
   int i, j, slen = strlen(str), sublen = strlen(substr);
-  for (i = 0; i <= slen - sublen; i++) {
-    int match = 1;
-    for (j = 0; j < sublen; j++) {
-      if (str[i + j] != substr[j]) { match = 0; break; }
+  if (direction == 0) { //Scan the string from the beginning
+    for (i = 0; i <= slen - sublen; i++) {
+      int match = 1;
+      for (j = 0; j < sublen; j++) {
+        if (str[i + j] != substr[j]) { match = 0; break; }
+      }
+      if (match) return i;
     }
-    if (match) return i;
+  } else if (direction == 1) { //Scan the string from the end
+    for (i = slen - sublen; i >= 0; i--) {
+      int match = 1;
+      for (j = 0; j < sublen; j++) {
+        if (str[i + j] != substr[j]) { match = 0; break; }
+      }
+      if (match) return i;
+    }
   }
   return -1;
 }
@@ -171,7 +181,7 @@ float decimalCharToFloat(char* str) {
 
 void variableSubstitute(char* str) { //Replaces variable name with the value of that variable
   for (int i = 0; i < varIndex; i++) { //Check for variables in entry
-    int varCheck = indexOf(str, vars[i].name);
+    int varCheck = indexOf(str, vars[i].name, 0);
     if (varCheck != -1) {
       int j = 0; //Length of variable name
       while (vars[i].name[j] != '\0') {
@@ -216,7 +226,7 @@ void variableSubstitute(char* str) { //Replaces variable name with the value of 
   }
 }
 
-void solveArithmetic(char* str) {
+void solveArithmetic(char* str, int outerFunction) {
   char tempFloat[8];
   int termsIndex = 0;
   float result = 0;
@@ -364,13 +374,46 @@ void solveArithmetic(char* str) {
 
   result = flTerms[0];
 
+  if (outerFunction == 1) {
+    result = log(result);
+  } else if (outerFunction == 2) {
+    result = abs(result);
+  } else if (outerFunction == 3) {
+    result = sin(result);
+  } else if (outerFunction == 4) {
+    result = cos(result);
+  } else if (outerFunction == 5) {
+    result = tan(result);
+  } else if (outerFunction == 6) {
+    result = log10(result);
+  } else if (outerFunction == 7) {
+    result = exp(result);
+  } else if (outerFunction == 8) {
+    result = sqrt(result);
+  } else if (outerFunction == 9) {
+    result = cbrt(result);
+  } else if (outerFunction == 10) {
+    result = asin(result);
+  } else if (outerFunction == 11) {
+    result = acos(result);
+  } else if (outerFunction == 12) {
+    result = atan(result);
+  } else if (outerFunction == 13) {
+    result = ceil(result);
+  } else if (outerFunction == 14) {
+    result = tgamma(result+1);
+  } else if (outerFunction == 15) {
+    result = round(result);
+  } else if (outerFunction == 16) {
+    result = floor(result);
+  }
+
   if (fmod(result, 1) == 0.00) {
     int resultInt = result;
     sprintf(str, "%d", resultInt);
   } else {
     sprintf(str, "%f", result);
   }
-  //Serial.println(str);
 }
 
 void solveParentheses(char* str) {
@@ -392,8 +435,71 @@ void solveParentheses(char* str) {
     j++;
   }
   tempString[j] = '\0';
+  //Serial.println(str);
+  //Serial.println(startingIndex);
+  //Serial.println(tempString);
+  //Serial.println("");
 
-  solveArithmetic(tempString);
+  int outerFunction = 0;
+  if (startingIndex > 5) {
+    if (str[startingIndex-5] == 'r' && str[startingIndex-4] == 'o' && str[startingIndex-3] == 'u' && str[startingIndex-2] == 'n' && str[startingIndex-1] == 'd') {
+      outerFunction = 15;
+      startingIndex = startingIndex - 5;
+    } else if (str[startingIndex-5] == 'f' && str[startingIndex-4] == 'l' && str[startingIndex-3] == 'o' && str[startingIndex-2] == 'o' && str[startingIndex-1] == 'r') {
+      outerFunction = 16;
+      startingIndex = startingIndex - 5;
+    }
+  } else if (startingIndex > 4) {
+    if (str[startingIndex-4] == 's' && str[startingIndex-3] == 'q' && str[startingIndex-2] == 'r' && str[startingIndex-1] == 't') {
+      outerFunction = 8;
+      startingIndex = startingIndex - 4;
+    } else if (str[startingIndex-4] == 'c' && str[startingIndex-3] == 'b' && str[startingIndex-2] == 'r' && str[startingIndex-1] == 't') {
+      outerFunction = 9;
+      startingIndex = startingIndex - 4;
+    } else if (str[startingIndex-4] == 'a' && str[startingIndex-3] == 's' && str[startingIndex-2] == 'i' && str[startingIndex-1] == 'n') {
+      outerFunction = 10;
+      startingIndex = startingIndex - 4;
+    } else if (str[startingIndex-4] == 'a' && str[startingIndex-3] == 'c' && str[startingIndex-2] == 'o' && str[startingIndex-1] == 's') {
+      outerFunction = 11;
+      startingIndex = startingIndex - 4;
+    } else if (str[startingIndex-4] == 'a' && str[startingIndex-3] == 't' && str[startingIndex-2] == 'a' && str[startingIndex-1] == 'n') {
+      outerFunction = 12;
+      startingIndex = startingIndex - 4;
+    } else if (str[startingIndex-4] == 'c' && str[startingIndex-3] == 'e' && str[startingIndex-2] == 'i' && str[startingIndex-1] == 'l') {
+      outerFunction = 13;
+      startingIndex = startingIndex - 4;
+    } else if (str[startingIndex-4] == 'f' && str[startingIndex-3] == 'a' && str[startingIndex-2] == 'c' && str[startingIndex-1] == 't') {
+      outerFunction = 14;
+      startingIndex = startingIndex - 4;
+    }
+  } else if (startingIndex > 3) {
+    if (str[startingIndex-3] == 'a' && str[startingIndex-2] == 'b' && str[startingIndex-1] == 's') {
+      outerFunction = 2;
+      startingIndex = startingIndex - 3;
+    } else if (str[startingIndex-3] == 's' && str[startingIndex-2] == 'i' && str[startingIndex-1] == 'n') {
+      outerFunction = 3;
+      startingIndex = startingIndex - 3;
+    } else if (str[startingIndex-3] == 'c' && str[startingIndex-2] == 'o' && str[startingIndex-1] == 's') {
+      outerFunction = 4;
+      startingIndex = startingIndex - 3;
+    } else if (str[startingIndex-3] == 't' && str[startingIndex-2] == 'a' && str[startingIndex-1] == 'n') {
+      outerFunction = 5;
+      startingIndex = startingIndex - 3;
+    } else if (str[startingIndex-3] == 'l' && str[startingIndex-2] == 'o' && str[startingIndex-1] == 'g') {
+      outerFunction = 6;
+      startingIndex = startingIndex - 3;
+    } else if (str[startingIndex-3] == 'e' && str[startingIndex-2] == 'x' && str[startingIndex-1] == 'p') {
+      outerFunction = 7;
+      startingIndex = startingIndex - 3;
+    }
+  } else if (startingIndex > 2) {
+    if (str[startingIndex-2] == 'l' && str[startingIndex-1] == 'n') {
+      outerFunction = 1;
+      startingIndex = startingIndex - 2;
+    }
+  }
+
+  solveArithmetic(tempString, outerFunction);
 
   int m = 0;
   char substitute[INPUT_LEN];
@@ -414,8 +520,8 @@ void solveParentheses(char* str) {
 }
 
 int containsParentheses(char* str) {
-  int parCheck1 = indexOf(str, ")");
-  int parCheck2 = indexOf(str, "(");
+  int parCheck1 = indexOf(str, ")", 0);
+  int parCheck2 = indexOf(str, "(", 0);
   if (parCheck1 != -1 && parCheck2 != -1) {
     return 1;
   } else {
@@ -424,9 +530,9 @@ int containsParentheses(char* str) {
 }
 
 void dollarSignDoublePar(char* str) { //Replaces expression in $(( )) with the solution to that expression
-  int expCheck = indexOf(str, "$(("); //Check for expression in parentheses
+  int expCheck = indexOf(str, "$((", 0); //Check for expression in parentheses
   if (expCheck != -1) {
-    int expCheck2 = indexOf(str, "))");
+    int expCheck2 = indexOf(str, "))", 1);
     if (expCheck2 != -1) {
       int j = 0;
       char cmdOld[INPUT_LEN] = "";
@@ -441,7 +547,6 @@ void dollarSignDoublePar(char* str) { //Replaces expression in $(( )) with the s
       exp[j] = '\0';
 
       variableSubstitute(exp);
-
       while (containsParentheses(exp) == 1) {
         solveParentheses(exp);
       }
@@ -1369,7 +1474,7 @@ void executeCommand(char* line) {
   else if (strcmp_P(cmd, PSTR("echo")) == 0) {
     variableSubstitute(args);
 
-    int arrow = indexOf(args, " > ");
+    int arrow = indexOf(args, " > ", 0);
     if (arrow != -1) { //Option to use > to send string to file
       char text[40] = "";
       strncpy(text, args, arrow);
@@ -1566,7 +1671,7 @@ void executeCommand(char* line) {
       }
       if (!any) strcat(outputBuffer, "No aliases.");
     } else {
-      int eq = indexOf(args, "=");
+      int eq = indexOf(args, "=", 0);
       if (eq == -1) {
         // show single alias
         int j, found = 0;
@@ -1712,7 +1817,7 @@ void executeCommand(char* line) {
       }
     }
 
-    int eqCheck = indexOf(cmd, "="); //Check for variables being set
+    int eqCheck = indexOf(cmd, "=", 0); //Check for variables being set
     if (eqCheck != -1) {
       resolved = 1;
       char varName[INPUT_LEN] = "";
