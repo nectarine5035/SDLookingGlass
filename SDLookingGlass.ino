@@ -590,37 +590,35 @@ void wrapText(char* str, int* globalLineStarts) {
   int i;
 
   for (i = 0; str[i] != '\0'; i++) {
-    //Serial.print(i);
-    //Serial.print(": ");
     //Serial.print(str[i]);
-    //Serial.print("/");
-    //Serial.print(str[i], HEX);
-    //Serial.print(" [count=");
-    //Serial.print(count);
-    //Serial.print("] [prevSpace=");
-    //Serial.print(prevSpace);
-    //Serial.println("]");
-
     if (str[i] == ' ') {
       prevSpace = i;
     }
     if (count >= COLS && prevSpace != 0) {
-      //Serial.println("This enters the if statement");
       if (str[prevSpace] == 0x0D) {
         globalLineStarts[lineCount] = i;
         lineCount++;
+        //Serial.println(" (if statement A)");
+        //Serial.print(lineCount);
+        //Serial.print(": ");
         count = -1;
       } else {
         str[prevSpace] = 0x0D; //A special character is used for newlines in wrapText, so that newlines typed in the text by the user can be preserved
         globalLineStarts[lineCount] = prevSpace + 1;
         lineCount++;
+        //Serial.println(" (if statement B)");
+        //Serial.print(lineCount);
+        //Serial.print(": ");
         i = prevSpace;
         count = -1;
       }
     }
     if (str[i] == '\n') {
-      globalLineStarts[lineCount] = i;
+      globalLineStarts[lineCount] = i + 1;
       lineCount++;
+        //Serial.println(" (if statement C)");
+        //Serial.print(lineCount);
+        //Serial.print(": ");
       count = -1;
       prevSpace = 0;
     }
@@ -738,13 +736,27 @@ void keyboardEdit(char* str, char* saveFilePath) {
         }
       } else if (ps2 == 0x117) { //Up arrow
         if (absoluteLine(cursor, lineStarts) > 0) {
-          int spacing = lineStarts[absoluteLine(cursor, lineStarts)-1] + cursor - lineStarts[absoluteLine(cursor, lineStarts)];
-          cursor = spacing;
+          int aboveLineLength = lineStarts[absoluteLine(cursor, lineStarts)] - lineStarts[absoluteLine(cursor, lineStarts)-1];
+          int cursorSpace = cursor - lineStarts[absoluteLine(cursor, lineStarts)];
+          if (aboveLineLength > cursorSpace) {
+            cursor = lineStarts[absoluteLine(cursor, lineStarts)-1] + cursorSpace;
+          } else {
+            cursor = lineStarts[absoluteLine(cursor, lineStarts)];
+          }
         }
       } else if (ps2 == 0x118) { //Down arrow
-        int spacing = lineStarts[absoluteLine(cursor, lineStarts)+1] + cursor - lineStarts[absoluteLine(cursor, lineStarts)];
-        if (spacing <= currentLen) {
-          cursor = spacing-1;
+        if (absoluteLine(cursor, lineStarts) < absoluteLine(currentLen, lineStarts)) {
+          int belowLineLength = lineStarts[absoluteLine(cursor, lineStarts)+2] - lineStarts[absoluteLine(cursor, lineStarts)+1];
+          int cursorSpace = cursor - lineStarts[absoluteLine(cursor, lineStarts)];
+          if (belowLineLength > cursorSpace) {
+            cursor = lineStarts[absoluteLine(cursor, lineStarts)+1] + cursorSpace - 1;
+          } else {
+            if (absoluteLine(cursor, lineStarts) + 1 == absoluteLine(currentLen, lineStarts)) {
+              cursor = currentLen;
+            } else {
+              cursor = lineStarts[absoluteLine(cursor, lineStarts)+2] - 1;
+            }
+          }
         }
       } else if (ps2 == 0x11C) { //Backspace
         saveState = 0;
@@ -876,6 +888,8 @@ void keyboardEdit(char* str, char* saveFilePath) {
               }
             }
           }
+        } else {
+          return;
         }
       } else {
         printing = 0;
@@ -1191,13 +1205,27 @@ void terminalKeyboardEdit(char* strIn, char* strOut) {
         }
       } else if (ps2 == 0x117) { //Up arrow
         if (absoluteLine(cursor, outputLineStarts) > 0) {
-          int spacing = outputLineStarts[absoluteLine(cursor, outputLineStarts)-1] + cursor - outputLineStarts[absoluteLine(cursor, outputLineStarts)];
-          cursor = spacing;
+          int aboveLineLength = outputLineStarts[absoluteLine(cursor, outputLineStarts)] - outputLineStarts[absoluteLine(cursor, outputLineStarts)-1];
+          int cursorSpace = cursor - outputLineStarts[absoluteLine(cursor, outputLineStarts)];
+          if (aboveLineLength > cursorSpace) {
+            cursor = outputLineStarts[absoluteLine(cursor, outputLineStarts)-1] + cursorSpace;
+          } else {
+            cursor = outputLineStarts[absoluteLine(cursor, outputLineStarts)];
+          }
         }
       } else if (ps2 == 0x118) { //Down arrow
-        int spacing = outputLineStarts[absoluteLine(cursor, outputLineStarts)+1] + cursor - outputLineStarts[absoluteLine(cursor, outputLineStarts)];
-        if (spacing <= currentLen) {
-          cursor = spacing-1;
+        if (absoluteLine(cursor, outputLineStarts) < absoluteLine(currentLen, outputLineStarts)) {
+          int belowLineLength = outputLineStarts[absoluteLine(cursor, outputLineStarts)+2] - outputLineStarts[absoluteLine(cursor, outputLineStarts)+1];
+          int cursorSpace = cursor - outputLineStarts[absoluteLine(cursor, outputLineStarts)];
+          if (belowLineLength > cursorSpace) {
+            cursor = outputLineStarts[absoluteLine(cursor, outputLineStarts)+1] + cursorSpace - 1;
+          } else {
+            if (absoluteLine(cursor, outputLineStarts) + 1 == absoluteLine(currentLen, outputLineStarts)) {
+              cursor = currentLen;
+            } else {
+              cursor = outputLineStarts[absoluteLine(cursor, outputLineStarts)+2] - 1;
+            }
+          }
         }
       } else if (ps2 == 0x11C) { //Backspace
         if (highlighting == 1 && cursor > staticLen && highlightEnd > staticLen) {
