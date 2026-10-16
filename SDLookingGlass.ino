@@ -2,7 +2,9 @@
 #include <Adafruit_SH110X.h>
 #include <PS2KeyAdvanced.h>
 
-const int chipSelect = BUILTIN_SDCARD;
+const int internalSD = BUILTIN_SDCARD;
+const int removableSD = 40;
+SDClass SD1;
 
 #define INPUT_LEN 32
 char inputBuffer[INPUT_LEN] = "";
@@ -41,17 +43,15 @@ typedef struct {
 shVariable vars[VAR_SPACES];
 int varIndex = 0;
 
-#define OLED_MOSI     10
-#define OLED_CLK      8
-#define OLED_DC       7
-#define OLED_CS       5
-#define OLED_RST      9
-Adafruit_SH1106G display = Adafruit_SH1106G(128, 64,OLED_MOSI, OLED_CLK, OLED_DC, OLED_RST, OLED_CS);
+#define OLED_DC       2
+#define OLED_CS       3
+#define OLED_RST      4
+Adafruit_SH1106G display = Adafruit_SH1106G(128, 64, MOSI, SCK, OLED_DC, OLED_RST, OLED_CS); //On Teensy 4.1: MOSI=11, MISO=12, SCK=13
 #define COLS 21
 #define ROWS 8
 
-#define DataPin 13
-#define IRQpin 14
+#define DataPin 18
+#define IRQpin 19
 PS2KeyAdvanced keyboard;
 #define MAX_LEN 100000 //There are usually around 100,000 bytes free in RAM1 for this but don't push it
 char fileBuffer[MAX_LEN];
@@ -70,11 +70,13 @@ char promptBuffer[OUTPUT_LEN + 25 + PATH_LEN];
 const int outputLinesEstimation = floor(OUTPUT_LEN/3);
 int outputLineStarts[outputLinesEstimation];
 
-float freeMemory() {
+char mountPointPath[PATH_LEN];
+
+float freeMemory(int SDPin) {
   Sd2Card card;
   SdVolume volume;
 
-  if (!card.init(SPI_HALF_SPEED, chipSelect)) {
+  if (!card.init(SPI_HALF_SPEED, SDPin)) {
     Serial.println("initialization failed");
     return 0;
   }
@@ -1367,7 +1369,7 @@ void setup() {
   display.display();
   keyboard.begin(DataPin, IRQpin);
 
-  if (!SD.begin(chipSelect)) {
+  if (!SD.begin(internalSD)) {
     printSection("SD card\ninitialization failed", 0, 29);
     while (true);
   }
@@ -1628,7 +1630,7 @@ void executeCommand(char* line) {
   }
   else if (strcmp_P(cmd, PSTR("df")) == 0 || strcmp_P(cmd, PSTR("free")) == 0) {
     char str[10];
-    sprintf(str, "%f", freeMemory());
+    sprintf(str, "%f", freeMemory(internalSD));
     strcat(outputBuffer, "Free Disk Space: ");
     strcat(outputBuffer, str);
     strcat(outputBuffer, " GB\n");
@@ -1638,7 +1640,7 @@ void executeCommand(char* line) {
   }
   else if (strcmp_P(cmd, PSTR("uname")) == 0) {
     char str[10];
-    sprintf(str, "%f", freeMemory());
+    sprintf(str, "%.2f", freeMemory(internalSD));
     strcat(outputBuffer, "SDLookingGlass v1.0\n"
     "Kernel: Arduino "
     "AVR\n"
@@ -1827,6 +1829,26 @@ void executeCommand(char* line) {
       strcat(outputBuffer, "\n");
       str[0] = '\0';
     }
+  }
+  else if (strcmp_P(cmd, PSTR("lsblk")) == 0) {
+
+    char str[10];
+    sprintf(str, "%.2f", freeMemory(internalSD));
+    strcat(outputBuffer, "NAME SIZE    MTPTS\n");
+    strcat(outputBuffer, "sda  ");
+    strcat(outputBuffer, str);
+    strcat(outputBuffer, "GB /\n");
+    if (SD.begin(removableSD)) {
+      sprintf(str, "%.2f", freeMemory(removableSD));
+      strcat(outputBuffer, "mmc  ");
+      strcat(outputBuffer, str);
+      strcat(outputBuffer, "GB ");
+      strcat(outputBuffer, mountPointPath);
+      strcat(outputBuffer, "\n");
+    }
+    delay(700);
+    display.begin(0, true);
+    display.display();
   } else {
     int j, resolved = 0; //Check alias
     for (j = 0; j < MAX_ALIASES; j++) {
