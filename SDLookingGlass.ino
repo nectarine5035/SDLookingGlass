@@ -3,8 +3,6 @@
 #include <PS2KeyAdvanced.h>
 
 const int internalSD = BUILTIN_SDCARD;
-const int removableSD = 40;
-SDClass SD1;
 
 #define INPUT_LEN 32
 char inputBuffer[INPUT_LEN] = "";
@@ -43,10 +41,12 @@ typedef struct {
 shVariable vars[VAR_SPACES];
 int varIndex = 0;
 
-#define OLED_DC       2
-#define OLED_CS       3
+#define OLED_DC       5
+#define OLED_CS       6
 #define OLED_RST      4
-Adafruit_SH1106G display = Adafruit_SH1106G(128, 64, MOSI, SCK, OLED_DC, OLED_RST, OLED_CS); //On Teensy 4.1: MOSI=11, MISO=12, SCK=13
+#define OLED_MOSI     3
+#define OLED_SCK      2
+Adafruit_SH1106G display = Adafruit_SH1106G(128, 64, OLED_MOSI, OLED_SCK, OLED_DC, OLED_RST, OLED_CS); //On Teensy 4.1: MOSI=11, MISO=12, SCK=13
 #define COLS 21
 #define ROWS 8
 
@@ -70,7 +70,12 @@ char promptBuffer[OUTPUT_LEN + 25 + PATH_LEN];
 const int outputLinesEstimation = floor(OUTPUT_LEN/3);
 int outputLineStarts[outputLinesEstimation];
 
+const int removableSD = 40;
+SDClass SD1;
 char mountPointPath[PATH_LEN];
+int removableSDMounted = 0;
+int inMountedPath = 0;
+char removablePath[PATH_LEN];
 
 float freeMemory(int SDPin) {
   Sd2Card card;
@@ -1360,6 +1365,17 @@ void terminalKeyboardEdit(char* strIn, char* strOut) {
   }
 }
 
+void argsSeparate(char* strStart, char* strEnd) {
+  for (int i = 0; strStart[i] != '\0'; i++) { //Break up the input into command (everything before first space) and arguments
+    if (strStart[i] == ' ') {
+      strcpy(strEnd, strStart + i + 1);
+      strEnd[INPUT_LEN-1] = '\0';
+      strStart[i] = '\0';
+      break;
+    }
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   display.begin(0, true);
@@ -1401,23 +1417,18 @@ void executeCommand(char* line) {
   strcpy(cmd, line);
 
   dollarSignDoublePar(cmd);
-
-  for (int i = 0; cmd[i] != '\0'; i++) { //Break up the input into command (everything before first space) and arguments
-    if (cmd[i] == ' ') {
-      strcpy(args, cmd + i + 1);
-      args[INPUT_LEN-1] = '\0';
-      cmd[i] = '\0';
-      break;
-    }
-  }
-
+  argsSeparate(cmd, args);
   toLowercase(cmd);
 
   if (strcmp_P(cmd, PSTR("ls")) == 0) {
     int empty = 1;
 
-    File lsDir = SD.open(currentPath);
-
+    File lsDir;
+    if (inMountedPath) {
+      lsDir = SD1.open(removablePath);
+    } else {
+      lsDir = SD.open(currentPath);
+    }
     while (true) {
       File lsEntry =  lsDir.openNextFile();
       if (! lsEntry) {
@@ -1443,33 +1454,60 @@ void executeCommand(char* line) {
   else if (strcmp_P(cmd, PSTR("mkdir")) == 0) {
     char dirPath[NAME_LEN + PATH_LEN];
 
-    if (strcmp_P(currentPath, PSTR("/")) == 0) {
-      strcpy(dirPath, args);
-    } else {
-      strcpy(dirPath, currentPath);
-      strcat(dirPath, "/");
-      strcat(dirPath, args);
-    }
+    if (inMountedPath) {
+      if (strcmp_P(currentPath, PSTR("/")) == 0) {
+        strcpy(dirPath, args);
+      } else {
+        strcpy(dirPath, removablePath);
+        strcat(dirPath, "/");
+        strcat(dirPath, args);
+      }
 
-    SD.mkdir(dirPath);
+      SD1.mkdir(dirPath);
+    } else {
+      if (strcmp_P(currentPath, PSTR("/")) == 0) {
+        strcpy(dirPath, args);
+      } else {
+        strcpy(dirPath, currentPath);
+        strcat(dirPath, "/");
+        strcat(dirPath, args);
+      }
+
+      SD.mkdir(dirPath);
+    }
   }
   else if (strcmp_P(cmd, PSTR("touch")) == 0) {
     char filePath[NAME_LEN + PATH_LEN];
-    strcpy(filePath, currentPath);
-    strcat(filePath, "/");
-    strcat(filePath, args);
-    
-    File myFile = SD.open(filePath, FILE_WRITE);
+    File myFile;
+    if (inMountedPath) {
+      strcpy(filePath, removablePath);
+      strcat(filePath, "/");
+      strcat(filePath, args);
+      
+      myFile = SD1.open(filePath, FILE_WRITE);
+    } else {
+      strcpy(filePath, currentPath);
+      strcat(filePath, "/");
+      strcat(filePath, args);
+      
+      myFile = SD.open(filePath, FILE_WRITE);
+    }
     myFile.close();
   }
   else if (strcmp_P(cmd, PSTR("cd")) == 0) {
     if (strcmp_P(args, PSTR("..")) == 0 || strcmp_P(args, PSTR("/")) == 0) { //Move back to top directory
       strcpy(currentPath, "/");
       currentPath[PATH_LEN - 1] = '\0';
+      inMountedPath = 0;
     } else {
       int found = 0;
 
-      File dir = SD.open(currentPath);
+      File dir;
+      if (inMountedPath) {
+        dir = SD1.open(removablePath);
+      } else {
+        dir = SD.open(currentPath);
+      }
 
       while (true) {
         File entry =  dir.openNextFile();
@@ -1490,7 +1528,18 @@ void executeCommand(char* line) {
           strcpy(currentPath, "/");
           currentPath[PATH_LEN - 1] = '\0';
           strcat(outputBuffer, "Path too long.");
+          inMountedPath = 0;
           return;
+        } else {
+          if ((strcmp_P(currentPath, mountPointPath) == 0) && removableSDMounted) {
+            if (inMountedPath) {
+              strcat(removablePath, args);
+              strcat(removablePath, "/");
+            } else {
+              inMountedPath = 1;
+              strcpy(removablePath, "/");
+            }
+          }
         }
       } else {
         strcat(outputBuffer, "No dir.");
@@ -1513,14 +1562,23 @@ void executeCommand(char* line) {
       strcpy(filename, args + arrow + 3);
       filename[NAME_LEN - 1] = '\0';
       char newfilepath[PATH_LEN] = "";
-      strcpy(newfilepath, currentPath);
+      if (inMountedPath) {
+        strcpy(newfilepath, removablePath);
+      } else {
+        strcpy(newfilepath, currentPath);
+      }
 
       strcat(newfilepath, filename);
 
-      File dataFile = SD.open(newfilepath, FILE_WRITE);
+      File dataFile;
+      if (inMountedPath) {
+        dataFile = SD1.open(newfilepath, FILE_WRITE);
+      } else {
+        dataFile = SD.open(newfilepath, FILE_WRITE);
+      }
 
       if (dataFile) {
-        dataFile.println(text);
+        dataFile.print(text);
         dataFile.close();
         strcat(outputBuffer, text);
       } else {
@@ -1534,10 +1592,19 @@ void executeCommand(char* line) {
   else if (strcmp_P(cmd, PSTR("cat")) == 0) {
     char str[OUTPUT_LEN - (26 + NAME_LEN + PATH_LEN)];
     char newfilepath[PATH_LEN] = "";
-    strcpy(newfilepath, currentPath);
+    if (inMountedPath) {
+      strcpy(newfilepath, removablePath);
+    } else {
+      strcpy(newfilepath, currentPath);
+    }
     strcat(newfilepath, args);
 
-    File myFile = SD.open(newfilepath);
+    File myFile;
+    if (inMountedPath) {
+      myFile = SD1.open(newfilepath);
+    } else {
+      myFile = SD.open(newfilepath);
+    }
 
     if (myFile) {
       int i = 0;
@@ -1557,12 +1624,20 @@ void executeCommand(char* line) {
     strcat(outputBuffer, "\n");
   }
   else if (strcmp_P(cmd, PSTR("info")) == 0) {
+    File myFile;
     char newfilepath[PATH_LEN] = "";
-    strcpy(newfilepath, currentPath);
-    strcat(newfilepath, args);
-
     char str[10];
-    File myFile = SD.open(newfilepath);
+    if (inMountedPath) {
+      strcpy(newfilepath, removablePath);
+      strcat(newfilepath, args);
+
+      myFile = SD1.open(newfilepath);
+    } else {
+      strcpy(newfilepath, currentPath);
+      strcat(newfilepath, args);
+
+      myFile = SD.open(newfilepath);
+    }
     if (myFile) {
       strcat(outputBuffer, "Name: ");
       strcat(outputBuffer, myFile.name());
@@ -1579,19 +1654,36 @@ void executeCommand(char* line) {
   }
   else if (strcmp_P(cmd, PSTR("rm")) == 0) {
     char filePath[NAME_LEN + PATH_LEN];
-    if (strcmp_P(currentPath, PSTR("/")) == 0) {
-      strcpy(filePath, args);
+    if (inMountedPath) {
+      if (strcmp_P(removablePath, PSTR("/")) == 0) {
+        strcpy(filePath, args);
+      } else {
+        strcpy(filePath, removablePath);
+        strcat(filePath, "/");
+        strcat(filePath, args);
+      }
+      if (SD1.exists(filePath)) {
+        SD1.remove(filePath);
+        SD1.rmdir(filePath);
+        strcat(outputBuffer, "Removed\n");
+      } else {
+        strcat(outputBuffer, "Not found\n");
+      }
     } else {
-      strcpy(filePath, currentPath);
-      strcat(filePath, "/");
-      strcat(filePath, args);
-    }
-    if (SD.exists(filePath)) {
-      SD.remove(filePath);
-      SD.rmdir(filePath);
-      strcat(outputBuffer, "Removed\n");
-    } else {
-      strcat(outputBuffer, "Not found\n");
+      if (strcmp_P(currentPath, PSTR("/")) == 0) {
+        strcpy(filePath, args);
+      } else {
+        strcpy(filePath, currentPath);
+        strcat(filePath, "/");
+        strcat(filePath, args);
+      }
+      if (SD.exists(filePath)) {
+        SD.remove(filePath);
+        SD.rmdir(filePath);
+        strcat(outputBuffer, "Removed\n");
+      } else {
+        strcat(outputBuffer, "Not found\n");
+      }
     }
   }
   else if (strcmp_P(cmd, PSTR("dmesg")) == 0) {
@@ -1667,7 +1759,12 @@ void executeCommand(char* line) {
 
     char script[INPUT_LEN];
 
-    File myFile = SD.open(args);
+    File myFile;
+    if (inMountedPath) {
+      myFile = SD1.open(args);
+    } else {
+      myFile = SD.open(args);
+    }
     if (myFile) {
       addDmesg(F("sh: running script"));
       int j = 0;
@@ -1831,24 +1928,113 @@ void executeCommand(char* line) {
     }
   }
   else if (strcmp_P(cmd, PSTR("lsblk")) == 0) {
-
     char str[10];
     sprintf(str, "%.2f", freeMemory(internalSD));
     strcat(outputBuffer, "NAME SIZE    MTPTS\n");
     strcat(outputBuffer, "sda  ");
     strcat(outputBuffer, str);
     strcat(outputBuffer, "GB /\n");
-    if (SD.begin(removableSD)) {
-      sprintf(str, "%.2f", freeMemory(removableSD));
+    if (SD1.begin(removableSD)) {
+      //sprintf(str, "%.2f", freeMemory(removableSD));
       strcat(outputBuffer, "mmc  ");
       strcat(outputBuffer, str);
       strcat(outputBuffer, "GB ");
       strcat(outputBuffer, mountPointPath);
       strcat(outputBuffer, "\n");
     }
-    delay(700);
-    display.begin(0, true);
-    display.display();
+    //delay(700);
+    //display.begin(0, true);
+    //display.display();
+  }
+  else if (strcmp_P(cmd, PSTR("cp")) == 0) {
+    char originalFile[INPUT_LEN];
+    char copyFile[INPUT_LEN];
+    strcpy(originalFile, args);
+    argsSeparate(originalFile, copyFile);
+
+    char openFilePath[PATH_LEN] = "";
+    strcpy(openFilePath, currentPath);
+    strcat(openFilePath, originalFile);
+    File openOriginalFile = SD.open(openFilePath);
+    int i = 0;
+    if (openOriginalFile) {
+      while (openOriginalFile.available() && i < MAX_LEN) {
+        fileBuffer[i] = openOriginalFile.read();
+        if (i >= 3) {
+          if (fileBuffer[i-3] == 0x20 && fileBuffer[i-2] == 0x0A && fileBuffer[i-1] == 0x0D && fileBuffer[i] == 0x0A) { //I get this series of chars at the end of files saved in FeatherPad. They add extra spaces to the end of the text, and if you try to delete them it makes the screen go blank, so this replaces them when the file is loaded
+            i = i - 3;
+            break;
+          }
+        }
+        i++;
+      }
+      openOriginalFile.close();
+      fileBuffer[i] = '\0';
+
+      char copiedFilePath[12] = "";
+      strcpy(copiedFilePath, currentPath);
+      strcat(copiedFilePath, copyFile);
+      File dataFile = SD.open(copiedFilePath, FILE_WRITE);
+      if (dataFile) {
+        dataFile.print(fileBuffer);
+        dataFile.close();
+      }
+    } else {
+      strcat(outputBuffer, "error opening file");
+    }
+  }
+  else if (strcmp_P(cmd, PSTR("mount")) == 0) {
+    char folder[INPUT_LEN];
+    char mountDevice[INPUT_LEN];
+    strcpy(folder, args);
+    argsSeparate(folder, mountDevice);
+
+    int found = 0;
+    File dir = SD.open(currentPath);
+    while (true) {
+      File entry =  dir.openNextFile();
+      if (! entry) {
+        // no more files
+        //Serial.println("");
+        break;
+      }
+
+      if (entry.isDirectory() && strcmp(folder, entry.name()) == 0) {
+        found = 1;
+      }
+      entry.close();
+    }
+    if (found) {
+      strcat(mountPointPath, currentPath);
+      strcat(mountPointPath, folder);
+      strcat(mountPointPath, "/");
+    } else {
+      strcat(outputBuffer, "No dir\n");
+      return;
+    }
+
+    if ((strcmp_P(mountDevice, PSTR("mmc")) == 0) && SD1.begin(removableSD)) {
+      removableSDMounted = 1;
+    } else {
+      strcpy(mountPointPath, "");
+      strcat(outputBuffer, "Device ");
+      strcat(outputBuffer, mountDevice);
+      strcat(outputBuffer, " not found\n");
+      removableSDMounted = 0;
+    }
+    //delay(700);
+    //display.begin(0, true);
+    //display.display();
+  }
+  else if (strcmp_P(cmd, PSTR("umount")) == 0) {
+    if (strcmp_P(mountPointPath, args) == 0) {
+      strcpy(mountPointPath, "");
+      removableSDMounted = 0;
+    } else {
+      strcat(outputBuffer, "Mountpoint ");
+      strcat(outputBuffer, args);
+      strcat(outputBuffer, " not found\n");
+    }
   } else {
     int j, resolved = 0; //Check alias
     for (j = 0; j < MAX_ALIASES; j++) {
