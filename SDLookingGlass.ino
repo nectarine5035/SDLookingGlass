@@ -1958,16 +1958,14 @@ void executeCommand(char* line) {
     strcat(outputBuffer, str);
     strcat(outputBuffer, "GB /\n");
     if (SD1.begin(removableSD)) {
-      //sprintf(str, "%.2f", freeMemory(removableSD));
+      sprintf(str, "%.2f", freeMemory(removableSD));
       strcat(outputBuffer, "mmc  ");
       strcat(outputBuffer, str);
       strcat(outputBuffer, "GB ");
       strcat(outputBuffer, mountPointPath);
       strcat(outputBuffer, "\n");
     }
-    //delay(700);
-    //display.begin(0, true);
-    //display.display();
+    freeMemory(internalSD); //freeMemory(removableSD) will cause SDLookingGlass to use the removable SD card as the main file system. freeMemory(internalSD) switches it back
   }
   else if (strcmp_P(cmd, PSTR("cp")) == 0) {
     char originalFile[INPUT_LEN];
